@@ -5,6 +5,7 @@ import { createPreview } from './preview.js';
 import { exportLook } from './export.js';
 import { t, localized, applyLanguage } from './i18n.js';
 import { ACTIONS } from './behavior.js';
+import { readSharedLook } from './shared-look.js';
 
 const icons = {
   duck: '<path d="M5 14V8a6 6 0 0 1 12 0v3h5l-5 4v4H5Z"/><circle cx="13" cy="7" r=".8"/><path d="M8 20v2m6-2v2M6 22h4m2 0h4"/>',
@@ -36,6 +37,8 @@ const state = {
   saved: (Array.isArray(stored.saved) ? stored.saved : []).filter(look => look && typeof look.id === 'string' && look.selection && typeof look.selection === 'object').slice(0, 60).map(look => ({ id: look.id, selection: validSelection(look.selection), colors: normalizeRobotColors(look.colors), date: typeof look.date === 'string' ? look.date : new Date().toISOString(), thumbnail: look.thumbnailVersion === THUMBNAIL_VERSION && typeof look.thumbnail === 'string' && look.thumbnail.startsWith('data:image/') ? look.thumbnail : null, thumbnailVersion: THUMBNAIL_VERSION })),
   bouncing: !matchMedia('(prefers-reduced-motion: reduce)').matches,
 };
+let receivedLook = readSharedLook(location.hash);
+if (receivedLook) { state.selection = receivedLook.selection; state.colors = receivedLook.colors; clearSharedHash(); }
 let preview, toastTimer, reactionTimer, exporting = false, catalogObserver, catalogEpoch = 0, thumbnailFrame;
 const tr = (key, vars) => t(key, state.language, vars);
 const nameOf = item => localized(item, state.language);
@@ -45,6 +48,15 @@ function currentLook(selection = state.selection) { return OUTFITS.find(look => 
 function getLookName(selection = state.selection) { return currentLook(selection) ? nameOf(currentLook(selection)) : selectedItemIds(selection).length ? tr('mixName') : tr('bareName'); }
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3500); }
 function persist() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ language: state.language, selection: state.selection, colors: state.colors, colorLocked: state.colorLocked, favorites: [...state.favorites], saved: state.saved })); } catch { toast(tr('storageError')); } }
+function clearSharedHash() {
+  const url = new URL(location.href), params = new URLSearchParams(url.hash.slice(1)); params.delete('look'); url.hash = params.toString();
+  history.replaceState(history.state, '', url);
+}
+function refreshSharedReceipt() {
+  const note = $('shared-look-note');
+  note.hidden = !receivedLook || selectionKey(receivedLook.selection) !== selectionKey(state.selection) || colorKey(receivedLook.colors) !== colorKey(state.colors);
+  note.textContent = tr('sharedLookReceived');
+}
 function wearLook(look) {
   state.selection = validSelection(look.selection); state.colors = normalizeRobotColors(look.colors);
   preview?.setColors(state.colors); refreshLook({ geometry: true }); refreshColors(); renderCatalog(); persist();
@@ -54,6 +66,7 @@ function refreshLook({ geometry = false } = {}) {
   const look = currentLook(), hasClothes = selectedItemIds(state.selection).length > 0;
   $('look-name').textContent = getLookName();
   $('look-description').textContent = look ? localized(look, state.language, 'description') : tr(hasClothes ? 'mixDescription' : 'bareDescription');
+  refreshSharedReceipt();
   $('look-series').textContent = look ? nameOf(themeById.get(look.theme)).toUpperCase() : tr(hasClothes ? 'mixSeries' : 'original');
   const activeIds = selectedItemIds(state.selection, state.slot);
   const favoriteKey = look ? `look:${look.id}` : activeIds.length === 1 ? `item:${activeIds[0]}` : null;
@@ -173,6 +186,7 @@ const PALETTES = [
   { key: 'paletteMint', shell: '#a3bea5', accent: '#e2e6bd' }, { key: 'paletteBlue', shell: '#99b8cc', accent: '#ede3d2' }, { key: 'paletteRose', shell: '#dcb0ba', accent: '#f3dfc7' },
 ];
 function refreshColors() {
+  refreshSharedReceipt();
   $('shell-color').value = state.colors.shell; $('accent-color').value = state.colors.accent;
   $('palette-presets').innerHTML = PALETTES.map((palette, index) => `<button class="palette-preset${colorKey(palette) === colorKey(state.colors) ? ' active' : ''}" data-palette="${index}" style="background:linear-gradient(135deg,${palette.shell} 60%,${palette.accent} 60%)" aria-label="${escape(tr(palette.key))}" title="${escape(tr(palette.key))}" aria-pressed="${colorKey(palette) === colorKey(state.colors)}"></button>`).join('');
   $('palette-presets').querySelectorAll('button').forEach(button => button.addEventListener('click', () => setColors(PALETTES[button.dataset.palette])));
@@ -313,6 +327,11 @@ async function openPlayground() {
 }
 $('open-playground').addEventListener('click', openPlayground);
 playgroundDialog.addEventListener('cancel', event => { event.preventDefault(); closePlayground(); });
+window.addEventListener('hashchange', () => {
+  const look = readSharedLook(location.hash); if (look === undefined) return;
+  if (!look) { toast(tr('sharedLookInvalid')); return; }
+  receivedLook = look; closePlayground(); wearLook(look); preview?.setFraming('full'); clearSharedHash(); toast(tr('sharedLookReceived'));
+});
 setLanguage(state.language);
 createPreview({ viewer: $('viewer'), onFraming: updateFrameButton, colors: state.colors, selection: state.selection, onReaction: () => {
   const bubble = $('pet-reaction'); bubble.hidden = false; bubble.textContent = ['♡', '✦', '♪'][Math.floor(Math.random() * 3)]; clearTimeout(reactionTimer); reactionTimer = setTimeout(() => { bubble.hidden = true; }, 1700);
@@ -324,6 +343,7 @@ createPreview({ viewer: $('viewer'), onFraming: updateFrameButton, colors: state
   preview.thumbnails.set(look && colorKey(state.colors) === colorKey(lookColors(look)) ? thumbnailKey(look, false) : 'initial-preview', preview.makeThumbnail(state.selection, { colors: state.colors }));
   $('viewer-loading').hidden = true; $('export-look').disabled = false; $('open-playground').disabled = false; renderCatalog();
   window.duckrobe = { ready: true, state, rig: preview.rig, OUTFITS, ITEMS, THEMES, SLOT_IDS, ACCESSORY_REGIONS, ACTIONS, normalizeSelection, selectedItemIds, selectionKey, selectLook, selectItem, preview, thumbnails: preview.thumbnails, getLookName };
+  if (receivedLook !== undefined) toast(tr(receivedLook ? 'sharedLookReceived' : 'sharedLookInvalid'));
 }).catch(error => {
   console.error(error);
   $('viewer-loading').innerHTML = `${icon('duck')}<strong>${tr('renderError')}</strong><span>${escape(error.message)}</span><button class="save-button" id="retry-viewer">${tr('retry')}</button>`;
