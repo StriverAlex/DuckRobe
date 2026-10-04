@@ -1,4 +1,11 @@
 const copy = {
+  worldHarbor: ['Sea salt harbor', '海盐港湾'],
+  worldChoose: ['Environment', '场景'], worldArena: ['Classic arena', '经典场地'], worldCircuit: ['Miniature circuit', '微缩赛道'],
+  worldOverview: ['Overview', '全景'], circuitLap: ['Lap {count}', '第 {count} 圈'], circuitGate: ['Next checkpoint: {count}', '下一检查点：{count}'],
+  circuitStart: ['Cross the start line to begin a lap.', '走过起点线，开始计时一圈。'], circuitBest: ['Best {time}', '最佳 {time}'],
+  worldPark: ['Amusement park', '游乐场'], parkPassport: ['Park passport · {count}/4', '游园护照 · {count}/4'],
+  parkVisit: ['Visit the four marked stops to collect your stamps.', '走到四个标记地点，收集游园印章。'], parkComplete: ['All four stamps collected. Enjoy your little adventure!', '四枚印章集齐啦，继续享受小鸭的冒险。'],
+  parkEntrance: ['Entrance', '入口'], parkGarden: ['Garden', '花园'], parkWheel: ['Ferris wheel', '摩天轮'], parkCarousel: ['Carousel', '旋转木马'],
   fullLook: ['Full look', '看全身'], closeUp: ['Close up', '看近景'], colorTool: ['Colors', '调色'], motionTool: ['Moves', '动作'], closetEyebrow: ['02 / THE COLLECTION', '02 / 衣橱精选'],
   playgroundTry: ['Try in playground', '穿着这身去玩'], playgroundTitle: ['PLAYGROUND', '游乐场'],
   playgroundTagline: ['A little look. A little adventure.', '穿上喜欢的，出发去冒险。'],
