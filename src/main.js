@@ -45,6 +45,10 @@ function currentLook(selection = state.selection) { return OUTFITS.find(look => 
 function getLookName(selection = state.selection) { return currentLook(selection) ? nameOf(currentLook(selection)) : selectedItemIds(selection).length ? tr('mixName') : tr('bareName'); }
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3500); }
 function persist() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ language: state.language, selection: state.selection, colors: state.colors, colorLocked: state.colorLocked, favorites: [...state.favorites], saved: state.saved })); } catch { toast(tr('storageError')); } }
+function wearLook(look) {
+  state.selection = validSelection(look.selection); state.colors = normalizeRobotColors(look.colors);
+  preview?.setColors(state.colors); refreshLook({ geometry: true }); refreshColors(); renderCatalog(); persist();
+}
 function refreshLook({ geometry = false } = {}) {
   if (geometry) preview?.setSelection(state.selection);
   const look = currentLook(), hasClothes = selectedItemIds(state.selection).length > 0;
@@ -294,7 +298,8 @@ async function openPlayground() {
   try {
     const { createPlayground } = await import('./playground/index.js');
     if (visit !== playgroundVisit || !playgroundDialog.open) return;
-    playground = createPlayground({ host, selection: structuredClone(state.selection), colors: { ...state.colors }, language: state.language, sourceRig: preview.rig, onExit: closePlayground });
+    playground = createPlayground({ host, selection: structuredClone(state.selection), colors: { ...state.colors }, language: state.language, sourceRig: preview.rig, lookName: getLookName(), onExit: closePlayground,
+      onWear: photo => { closePlayground(); wearLook(photo); } });
     window.duckrobe.playground = playground;
   } catch (error) {
     if (visit !== playgroundVisit || !playgroundDialog.open) return;

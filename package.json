@@ -11,7 +11,8 @@
     "check:exports": "node scripts/validate-exports.mjs --all",
     "check:playground": "node scripts/validate-playground.mjs",
     "check:playground:ui": "node scripts/smoke-playground.mjs",
-    "check:worlds": "node scripts/validate-worlds.mjs"
+    "check:worlds": "node scripts/validate-worlds.mjs",
+    "check:adventures": "node scripts/validate-adventures.mjs"
   },
   "dependencies": {
     "@mujoco/mujoco": "3.11.0",

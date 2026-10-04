@@ -1,9 +1,9 @@
 .playground-view { position: relative; height: 100%; color: #fff4e4; background: #08080c; overflow: hidden; }
 .playground-canvas { position: absolute; inset: 0; }
 .playground-canvas canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.playground-view:not([data-world=arena]) .playground-canvas::after { content: ''; position: absolute; inset: 0; background: linear-gradient(0deg, #08080c99, transparent 190px); pointer-events: none; }
 .playground-header { position: absolute; inset: 0 0 auto; display: flex; gap: 24px; align-items: center; padding: 26px 30px; background: linear-gradient(#08080cee, #08080c00); pointer-events: none; }
 .playground-header button, .playground-header select, .playground-footer button, .playground-dpad, .playground-message button { pointer-events: auto; }
-.playground-view:not([data-world=arena]) .playground-canvas::after { content: ''; position: absolute; inset: 0; background: linear-gradient(0deg, #08080c99, transparent 190px); pointer-events: none; }
 .playground-world { display: grid; gap: 5px; margin-left: auto; font-size: 10px; color: #d2c4b5; }
 .playground-world select { min-height: 40px; max-width: 180px; padding: 8px 12px; border: 1px solid #ffffff30; border-radius: 10px; background: #18191fe8; color: #fff4e4; font: inherit; font-size: 12px; cursor: pointer; }
 .playground-world select:focus-visible { outline: 3px solid #ffc482; outline-offset: 3px; }
@@ -11,6 +11,26 @@
 .playground-activity strong { font-size: 13px; font-weight: 500; }.playground-activity span { font-size: 12px; color: #e1d9c9; }
 .playground-stamps { display: flex; gap: 5px; flex-wrap: wrap; max-width: 320px; }.playground-stamps:empty { display: none; }
 .playground-stamps span { border: 1px solid #ffffff30; border-radius: 5px; padding: 4px 6px; font-size: 10px; }.playground-stamps .collected { border-color: #ffc482; color: #ffc482; }
+.playground-tools { position: absolute; top: 110px; right: 30px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: end; max-width: 350px; }
+.playground-race-tools { display: flex; gap: 6px; pointer-events: auto; }
+.playground-activity [data-race-splits]:empty { display: none; }
+.playground-race-tools button { min-height: 32px !important; padding: 6px 9px !important; font-size: 11px !important; }
+.playground-race-tools [aria-pressed=true] { color: #ffc482; border-color: #ffc482; }
+.playground-interaction { position: absolute; left: 50%; bottom: 156px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 10px 12px 10px 18px; border-radius: 14px; background: #243d32ee; border: 1px solid #dfc69580; max-width: calc(100% - 40px); }
+.playground-interaction span { font-size: 12px; }.playground-interaction button { white-space: nowrap; color: #ffdca8; }
+.playground-notice { position: absolute; left: 50%; top: 28%; transform: translateX(-50%); max-width: min(440px, calc(100% - 32px)); padding: 13px 20px; border-radius: 12px; background: #243d32ee; color: #fff1d5; font-size: 13px; line-height: 1.5; text-align: center; pointer-events: none; }
+.playground-journal { position: absolute; inset: 0; z-index: 10; background: #121b17b8; padding: 28px; display: grid; place-items: center; }
+.journal-sheet { width: min(850px, 100%); max-height: 100%; overflow: auto; background: #f4ead5; color: #40594c; border-radius: 18px; padding: 24px; box-shadow: 0 24px 90px #0005; }
+.journal-sheet header { position: sticky; top: 0; z-index: 1; background: #f4ead5; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 8px 0; margin-bottom: 18px; }
+.journal-sheet header span { color: #9c7560; font-size: 10px; letter-spacing: 2px; }.journal-sheet h2 { font-size: 25px; margin: 8px 0 0; font-weight: 500; }
+.playground-view .journal-sheet button { background: #40594c; color: #fff0d4; border-color: #40594c; }
+.journal-photo { display: block; width: 100%; max-height: 57vh; object-fit: contain; }
+@media (prefers-reduced-motion: no-preference) { .journal-photo[data-instant] { animation: little-print .5s ease-out; } }
+@keyframes little-print { from { opacity: .5; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+.journal-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }.journal-note, [data-journal-status] { font-size: 12px; line-height: 1.6; }
+.journal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }.journal-grid article img { width: 100%; display: block; border: 1px solid #d4c5aa; }
+.journal-grid article p { font-size: 12px; }.journal-grid article > div { display: flex; gap: 6px; flex-wrap: wrap; }.journal-grid article button { font-size: 11px; padding: 7px 9px; min-height: 36px; }
+.journal-empty { padding: 55px 20px; text-align: center; }
 .playground-view button { border: 1px solid #ffffff30; background: #18191fe8; color: #fff4e4; border-radius: 12px; min-height: 44px; padding: 10px 17px; font: inherit; font-size: 13px; cursor: pointer; transition: background .15s; }
 .playground-view button:hover:not(:disabled) { background: #35312c; }
 .playground-view button:focus-visible { outline: 3px solid #ffc482; outline-offset: 3px; }
@@ -51,7 +71,10 @@
   .playground-hint { max-width: 100%; font-size: 11px; line-height: 1.5; margin-top: 17px; }
   .playground-note { font-size: 10px; }
   .playground-dpad { right: 14px; bottom: max(85px, calc(env(safe-area-inset-bottom) + 67px)); grid-template-columns: repeat(3, 44px); }
-  .playground-paused { top: 270px; }
+  .playground-paused { top: 335px; }
+  .playground-tools { top: 285px; right: 14px; left: 14px; max-width: none; justify-content: start; }.playground-tools button { padding: 8px 10px; font-size: 11px; min-height: 38px; }
+  .playground-interaction { bottom: 224px; width: calc(100% - 28px); max-width: none; gap: 8px; padding: 10px; }.playground-interaction span { flex: 1; }
+  .playground-notice { top: 345px; }.playground-journal { padding: 12px; }.journal-sheet { padding: 16px; }.journal-sheet h2 { font-size: 21px; }.journal-grid { grid-template-columns: 1fr; gap: 18px; }
 }
 @media (max-height: 500px) {
   .playground-title strong, .playground-note { display: none; }
@@ -63,4 +86,6 @@
   .playground-message { top: 47%; padding: 14px; }
   .playground-message h2 { margin: 4px 0; font-size: 18px; }
   .playground-spark { display: none; }
+  .playground-tools { top: 70px; left: auto; right: 18px; max-width: 320px; }.playground-interaction { bottom: 100px; width: auto; max-width: 440px; }.playground-notice { top: 125px; }
+  .playground-journal { padding: 10px; }.journal-sheet { padding: 14px; }.journal-sheet header { margin-bottom: 10px; }.journal-photo { max-height: 40vh; }
 }

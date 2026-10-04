@@ -10,6 +10,10 @@ import { loadPhysicsAssets } from './model.js';
 import { WORLDS, getWorld } from './worlds.js';
 import { createEnvironment } from './environment.js';
 import { createActivity, formatRaceTime } from './activity.js';
+import { createInteractions } from './interactions.js';
+import { createKeepsakes } from './keepsakes.js';
+import { createReplay } from './replay.js';
+import { createPhotography } from './photography.js';
 
 function disposeTree(root) {
   const geometries = new Set(), materials = new Set();
@@ -20,12 +24,14 @@ function disposeTree(root) {
   geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose());
 }
 
-export function createPlayground({ host, selection, colors, language, sourceRig, onExit, worldId = 'circuit' }) {
+export function createPlayground({ host, selection, colors, language, sourceRig, lookName = '', onExit, onWear, worldId = 'circuit' }) {
   const tr = (key, vars) => t(key, language, vars), chosen = normalizeSelection(selection);
   let selectedWorld = getWorld(worldId).id, overview = false;
   const inputs = new AbortController(), keys = new Set(), pointers = new Map(), pulses = new Set();
   const directions = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
   let disposed = false, current, status = 'loading', follow = true, latestPose = null, stage = 'assets';
+  let storage; try { storage = localStorage; } catch { /* In-memory keepsakes remain available. */ }
+  const keepsakes = createKeepsakes(storage);
   host.innerHTML = `
     <div class="playground-view" data-playground-status="loading">
       <div class="playground-canvas" data-canvas></div>
@@ -35,7 +41,10 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         <label class="playground-world"><span>${tr('worldChoose')}</span><select data-world aria-label="${tr('worldChoose')}">${WORLDS.map(world => `<option value="${world.id}"${world.id === selectedWorld ? ' selected' : ''}>${tr(world.label)}</option>`).join('')}</select></label>
         <span class="playground-status" data-status role="status" aria-live="polite"></span>
       </header>
-      <div class="playground-activity" data-activity hidden><strong data-activity-title></strong><span data-activity-detail></span><div class="playground-stamps" data-stamps></div></div>
+      <div class="playground-activity" data-activity hidden><strong data-activity-title></strong><span data-activity-detail></span><div class="playground-stamps" data-stamps></div><span data-race-splits></span><div class="playground-race-tools" data-race-tools hidden><button data-replay aria-pressed="false">${tr('raceReplay')}</button><button data-clear-record>${tr('raceClear')}</button></div></div>
+      <div class="playground-tools"><button data-portrait disabled>${tr('travelPortrait')}</button><button data-photo disabled>${tr('travelTake')}</button><button data-album>${tr('travelAlbum')}</button></div>
+      <div class="playground-interaction" data-interaction hidden><span data-interaction-hint></span><button data-interact disabled></button></div>
+      <div class="playground-notice" data-notice role="status" aria-live="polite" hidden></div>
       <div class="playground-message" data-message role="status" aria-live="polite">
         <span class="playground-spark" aria-hidden="true">✳</span><h2 data-message-title></h2><p data-detail></p>
         <button data-recover hidden>${tr('retry')}</button>
@@ -61,6 +70,19 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   const find = selector => host.querySelector(selector), view = find('.playground-view');
   const on = (target, event, callback, options = {}) => target.addEventListener(event, callback, { ...options, signal: inputs.signal });
   const post = message => current?.worker?.postMessage(message);
+  const photography = createPhotography({ view, tr, language, keepsakes, pause, onWear, snapshot: () => {
+    if (!current?.rig || !['running', 'paused'].includes(status)) return null;
+    const point = (current.world.photos || []).find(point => Math.hypot(latestPose.root[0] - point.pos[0], latestPose.root[1] - point.pos[1]) <= point.radius);
+    const date = new Date(), interaction = current.interactions.getState(), activity = current.activity.getState();
+    return { renderer: current.renderer, scene: current.scene, camera: current.camera, worldId: current.world.id,
+      place: tr(point?.label || current.world.label), look: lookName || tr('mixName'), date: date.toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-GB'), isoDate: date.toISOString(),
+      badge: activity.lastLap ? formatRaceTime(activity.lastLap.duration) : interaction.completed.includes('garden') ? 'BLOOM' : interaction.delivered.length === 3 ? 'AIR MAIL' : interaction.camera ? 'INSTANT' : '', personalCamera: interaction.camera, selection: chosen, colors: { ...colors } };
+  } });
+  function notice(message) {
+    if (!current) return;
+    clearTimeout(current.noticeTimer); find('[data-notice]').textContent = message; find('[data-notice]').hidden = false;
+    current.noticeTimer = setTimeout(() => { if (!disposed) find('[data-notice]').hidden = true; }, 4500);
+  }
   function movement() {
     const held = new Set([...keys].map(key => directions[key]).concat([...pointers.values()]));
     find('.playground-dpad').querySelectorAll('button').forEach(button => button.classList.toggle('held', held.has(button.dataset.direction)));
@@ -83,6 +105,9 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     find('[data-reset]').disabled = loading || error;
     find('[data-follow]').disabled = loading || error;
     find('[data-overview]').disabled = loading || error;
+    find('[data-portrait]').disabled = loading || error;
+    find('[data-photo]').disabled = !['running', 'paused'].includes(next);
+    find('[data-interact]').disabled = next !== 'running';
     find('.playground-dpad').querySelectorAll('button').forEach(button => { button.disabled = next !== 'running'; });
   }
   function pause() {
@@ -90,12 +115,12 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     clearInputs(); post({ type: 'pause' }); setStatus('paused');
   }
   function resume() {
-    if (status !== 'paused' || document.hidden) return;
+    if (status !== 'paused' || document.hidden || photography.open) return;
     clearInputs(); setStatus('running'); post({ type: 'resume' });
   }
   function reset() {
     if (!['running', 'paused', 'fallen'].includes(status)) return;
-    clearInputs(); post({ type: 'reset' }); setStatus('paused');
+    photography.close(); current.interactions.reset(); clearInputs(); post({ type: 'reset' }); setStatus('paused');
   }
   function setFollow(value) {
     follow = value; overview = false;
@@ -104,9 +129,9 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   function clean(attempt) {
     if (!attempt || attempt.cleaned) return;
     attempt.cleaned = true;
-    attempt.abort.abort(); clearTimeout(attempt.timeout); attempt.worker?.terminate();
+    attempt.abort.abort(); clearTimeout(attempt.timeout); clearTimeout(attempt.noticeTimer); attempt.worker?.terminate();
     cancelAnimationFrame(attempt.frame); attempt.observer?.disconnect(); attempt.controls?.dispose();
-    attempt.scenery?.dispose(); disposeTree(attempt.scene); attempt.environment?.dispose();
+    attempt.replay?.dispose(); attempt.scenery?.dispose(); disposeTree(attempt.scene); attempt.environment?.dispose();
     attempt.renderer?.dispose(); attempt.renderer?.forceContextLoss(); attempt.renderer?.domElement.remove();
   }
   function fail(attempt, error) {
@@ -117,19 +142,39 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     latestPose = pose;
     attempt.renderDirty = true;
     const activity = attempt.activity.update(pose);
+    const nearby = attempt.interactions.nearby(pose), interaction = attempt.interactions.getState();
+    find('[data-interaction]').hidden = !nearby;
+    if (nearby) {
+      const needsLetters = nearby.type === 'deliver' && !interaction.carrying;
+      find('[data-interaction-hint]').textContent = tr(needsLetters ? 'harborNeedLetters' : nearby.label);
+      find('[data-interact]').textContent = tr(nearby.type === 'water' ? interaction.wateringCan ? 'gardenPersonal' : 'gardenBorrow' : nearby.type === 'letters' ? 'harborCollect' : 'harborDeliver');
+      find('[data-interact]').disabled = status !== 'running' || needsLetters;
+    }
     if (pose.time < attempt.hudTime || pose.time - attempt.hudTime >= .1) {
       attempt.hudTime = pose.time;
-      find('[data-activity-title]').textContent = attempt.world.gates ? tr('circuitLap', { count: activity.laps + 1 }) : tr('parkPassport', { count: activity.stamps.length });
+      const harbor = attempt.world.id === 'harbor';
+      find('[data-activity-title]').textContent = attempt.world.gates ? tr('circuitLap', { count: activity.laps + 1 }) : tr(harbor ? 'harborProgress' : 'parkPassport', { count: harbor ? interaction.delivered.length : activity.stamps.length });
       find('[data-activity-detail]').textContent = attempt.world.gates ? (activity.started
         ? `${formatRaceTime(activity.elapsed)} · ${tr('circuitGate', { count: activity.nextGate || 4 })}${activity.best === null ? '' : ` · ${tr('circuitBest', { time: formatRaceTime(activity.best) })}`}`
-        : tr('circuitStart')) : tr(activity.stamps.length === 4 ? 'parkComplete' : 'parkVisit');
+        : tr(pose.time < 3 ? 'raceReady' : 'raceGo', { count: Math.max(1, 3 - Math.floor(pose.time)) })) : harbor
+          ? tr(interaction.delivered.length === 3 ? 'harborComplete' : interaction.carrying ? 'harborReady' : 'harborNeedLetters')
+          : tr(activity.stamps.length === 4 ? 'parkComplete' : 'parkVisit');
+      const splits = activity.lastLap?.splits || activity.splits;
+      find('[data-race-splits]').textContent = splits.length ? tr('raceSplits', { times: splits.map((split, i) => formatRaceTime(split - (splits[i - 1] || 0))).join(' / ') }) : '';
+      if (!activity.started && attempt.record) find('[data-race-splits]').textContent = tr('raceRecord', { time: formatRaceTime(attempt.record.duration) });
       find('[data-stamps]').querySelectorAll('[data-stop]').forEach(stamp => {
-        const collected = activity.stamps.includes(stamp.dataset.stop), stop = attempt.world.stops.find(stop => stop.id === stamp.dataset.stop);
+        const collected = (harbor ? interaction.delivered : activity.stamps).includes(stamp.dataset.stop), stop = (harbor ? attempt.world.interactions : attempt.world.stops).find(stop => stop.id === stamp.dataset.stop);
         stamp.classList.toggle('collected', collected); stamp.textContent = `${collected ? '✓ ' : ''}${tr(stop.label)}`;
       });
     }
     if (!attempt.rig) return;
     applySimulationPose(attempt.rig, pose);
+  }
+  function portraitCamera() {
+    if (!current?.controls || !latestPose) return;
+    const p = latestPose.root; setFollow(false);
+    current.controls.target.set(p[0], p[2] + .09, -p[1]);
+    current.camera.position.copy(current.controls.target).add(new THREE.Vector3(.34, .14, .48)); current.controls.update();
   }
   function showOverview(attempt) {
     if (!attempt?.controls) return;
@@ -149,12 +194,20 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     setFollow(true); attempt.controls.update();
   }
   async function boot() {
-    clean(current); latestPose = null; clearInputs(); stage = 'assets'; setStatus('loading');
-    const world = getWorld(selectedWorld);
-    const attempt = { abort: new AbortController(), world, activity: createActivity(world), hudTime: -Infinity }; current = attempt;
-    view.dataset.world = world.id; find('[data-activity]').hidden = !world.gates && !world.stops;
+    photography.close(); clean(current); latestPose = null; clearInputs(); stage = 'assets'; setStatus('loading');
+    find('[data-notice]').hidden = true; find('[data-interaction]').hidden = true;
+    const world = getWorld(selectedWorld), record = world.gates ? keepsakes.record(world) : null;
+    const attempt = { abort: new AbortController(), world, record, interactions: createInteractions(world, chosen), replayEnabled: false, hudTime: -Infinity }; current = attempt;
+    attempt.activity = createActivity(world, { record, onLap: lap => {
+      const saved = keepsakes.saveRace(world, lap); attempt.record = keepsakes.record(world);
+      find('[data-replay]').disabled = !attempt.record; find('[data-clear-record]').disabled = !attempt.record;
+      notice(`${tr('raceFinish', { time: formatRaceTime(lap.duration) })}${saved ? '' : ` · ${tr('travelStorage')}`}`);
+    } });
+    view.dataset.world = world.id; find('[data-activity]').hidden = !world.gates && !world.stops && !world.interactions;
+    find('[data-race-tools]').hidden = !world.gates; find('[data-replay]').setAttribute('aria-pressed', 'false'); find('[data-replay]').disabled = !record; find('[data-clear-record]').disabled = !record;
+    find('[data-race-splits]').textContent = '';
     find('[data-activity-title]').textContent = ''; find('[data-activity-detail]').textContent = '';
-    find('[data-stamps]').innerHTML = (world.stops || []).map(stop => `<span data-stop="${stop.id}">${tr(stop.label)}</span>`).join('');
+    find('[data-stamps]').innerHTML = (world.stops || world.interactions?.filter(point => point.type === 'deliver') || []).map(stop => `<span data-stop="${stop.id}">${tr(stop.label)}</span>`).join('');
     const alive = () => !disposed && current === attempt && !attempt.abort.signal.aborted;
     attempt.timeout = setTimeout(() => fail(attempt, new Error(tr('playgroundTimeout'))), 60000);
     try {
@@ -230,7 +283,14 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         if (latestPose) {
           const p = latestPose.root; target.set(p[0], p[2] + (world.id === 'park' ? .38 : 0), -p[1]);
           if (follow) { delta.copy(target).sub(controls.target).multiplyScalar(1 - Math.exp(-12 * elapsed)); controls.target.add(delta); camera.position.add(delta); }
-          attempt.scenery.update(latestPose, target, attempt.activity.getState());
+          const activity = attempt.activity.getState();
+          attempt.scenery.update(latestPose, target, activity, attempt.interactions.getState());
+          if (attempt.wateringCan) {
+            const waterTime = latestPose.time - (attempt.interactions.getState().wateredAt ?? -Infinity);
+            const tilt = !attempt.reducedMotion && waterTime >= 0 && waterTime < 2 ? Math.sin(waterTime * Math.PI / 2) * .4 : 0;
+            attempt.wateringCan.node.quaternion.copy(attempt.wateringCan.base).multiply(attempt.waterRotation.setFromAxisAngle(attempt.waterAxis, tilt));
+          }
+          attempt.replay?.update(attempt.record, activity.started ? activity.elapsed : -1, attempt.replayEnabled);
         }
         const cameraChanged = controls.update();
         // Paused/fallen scenes need drawing only after a pose, camera or size
@@ -245,6 +305,9 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         attempt.rig = rig;
         attempt.renderDirty = true;
         scene.add(dressSimulationRig(rig, chosen));
+        rig.group.traverse(node => { if (node.userData.kind === 'watering') attempt.wateringCan = { node, base: node.quaternion.clone() }; });
+        attempt.waterRotation = new THREE.Quaternion(); attempt.waterAxis = new THREE.Vector3(0, 1, 0); attempt.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (world.gates) { attempt.replay = createReplay(rig); scene.add(attempt.replay.group); }
         if (latestPose) syncPose(attempt, latestPose);
       });
       await Promise.all([rigPromise, workerPromise]);
@@ -258,9 +321,26 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   on(find('[data-reset]'), 'click', reset);
   on(find('[data-follow]'), 'click', () => follow ? setFollow(false) : resetCamera(current, false));
   on(find('[data-overview]'), 'click', () => showOverview(current));
+  on(find('[data-portrait]'), 'click', portraitCamera);
+  on(find('[data-photo]'), 'click', () => photography.take());
+  on(find('[data-album]'), 'click', () => photography.album());
+  on(find('[data-replay]'), 'click', () => { if (!current?.record) return; current.replayEnabled = !current.replayEnabled; find('[data-replay]').setAttribute('aria-pressed', String(current.replayEnabled)); });
+  on(find('[data-clear-record]'), 'click', () => {
+    if (!current?.world.gates) return;
+    const saved = keepsakes.clearRace(current.world); current.record = null; current.activity.clearRecord(); current.replayEnabled = false;
+    find('[data-replay]').disabled = true; find('[data-clear-record]').disabled = true; find('[data-replay]').setAttribute('aria-pressed', 'false');
+    notice(tr(saved ? 'raceRecordCleared' : 'travelStorage'));
+  });
+  on(find('[data-interact]'), 'click', () => {
+    if (status !== 'running') return;
+    clearInputs(); const action = current.interactions.perform(latestPose); if (!action) return;
+    notice(tr(action.type === 'water' ? 'gardenDone' : action.type === 'letters' ? 'harborCollected' : 'harborDelivered'));
+    current.hudTime = -Infinity; syncPose(current, latestPose);
+  });
   on(find('select[data-world]'), 'change', event => { selectedWorld = event.target.value; void boot(); });
   on(find('[data-recover]'), 'click', () => status === 'fallen' ? reset() : void boot());
   on(window, 'keydown', event => {
+    if (photography.open) return;
     if (directions[event.code]) {
       if (event.target instanceof HTMLSelectElement) return;
       event.preventDefault();
@@ -294,7 +374,8 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   return {
     pause, resume, reset,
     get rig() { return current?.rig; },
-    getState: () => ({ status, pose: latestPose, following: follow, worldId: selectedWorld, activity: current?.activity.getState(), selection: structuredClone(chosen), colors: { ...colors }, itemIds: selectedItemIds(chosen) }),
-    dispose() { if (disposed) return; disposed = true; inputs.abort(); clearInputs(); clean(current); current = null; host.replaceChildren(); },
+    getState: () => ({ status, pose: latestPose, following: follow, worldId: selectedWorld, activity: current?.activity.getState(), interactions: current?.interactions.getState(), replayEnabled: current?.replayEnabled,
+      record: current?.record ? { duration: current.record.duration, splits: [...current.record.splits] } : null, photos: keepsakes.photoCount(), selection: structuredClone(chosen), colors: { ...colors }, itemIds: selectedItemIds(chosen) }),
+    dispose() { if (disposed) return; disposed = true; photography.dispose(); inputs.abort(); clearInputs(); clean(current); current = null; host.replaceChildren(); },
   };
 }
