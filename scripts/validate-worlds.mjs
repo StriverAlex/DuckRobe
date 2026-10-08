@@ -36,8 +36,13 @@ const yUp = values => new Vector3(values[0], values[2], -values[1]);
 
 for (const id of ['circuit', 'park', 'harbor']) {
   const world = getWorld(id), scenery = createEnvironment(world);
-  const { xml } = preparePhysicsXml(source, world);
-  const sim = await createSimulation({ mujoco: instrumented, ort, ...assets, xml, policyUrl });
+  const worldAssets = await loadPhysicsAssets('http://duckrobe.test/playground/', undefined, world);
+  assert.equal(worldAssets.xml, preparePhysicsXml(source, world).xml, `${id} cached assets must use this world's contacts and spawn`);
+  worldAssets.meshes.forEach((mesh, i) => {
+    assert.notEqual(mesh.bytes, assets.meshes[i].bytes);
+    assert.deepEqual(new Uint8Array(mesh.bytes), new Uint8Array(assets.meshes[i].bytes));
+  });
+  const sim = await createSimulation({ mujoco: instrumented, ort, ...worldAssets, policyUrl });
   try {
     assert.equal(model.nu, 14); assert.equal(model.nq, 21);
     assert.deepEqual(dynamics(), originalDynamics, `${id} changed robot dynamics`);
@@ -77,7 +82,7 @@ for (const id of ['circuit', 'park', 'harbor']) {
     }
     const routes = id === 'park' ? [{ start: [1.70, -.20], yaw: 0, axis: 0, target: 2.15 }, { start: [0, -1.03], yaw: Math.PI / 2, axis: 1, target: -.15 }]
       : id === 'circuit' ? [{ start: [1.55, 1.12], yaw: Math.PI / 2, axis: 1, target: 1.80 }]
-      : [{ start: [-1.75, -.08], yaw: 0, axis: 0, target: -.70 }];
+      : [{ start: [-1.75, -.08], yaw: 0, axis: 0, target: -.70 }, { start: [1.10, -.70], yaw: Math.PI / 2, axis: 1, target: .22 }, { start: [2.60, -1.95], yaw: Math.PI / 2, axis: 1, target: -1.45 }];
     for (const route of routes) {
       sim.reset(); data.qpos[0] = route.start[0]; data.qpos[1] = route.start[1]; data.qpos[3] = Math.cos(route.yaw / 2); data.qpos[6] = Math.sin(route.yaw / 2); mujoco.mj_forward(model, data);
       for (let step = 0; step < 1100 && sim.snapshot().root[route.axis] < route.target; step++) assert(!(await sim.step({ forward: 1 })).fallen, `${id} route fall`);
@@ -87,6 +92,9 @@ for (const id of ['circuit', 'park', 'harbor']) {
     console.log(`PASS ${id}: unchanged dynamics, ${world.colliders.length} aligned colliders, real contacts, standing/walking and spawn reset`);
   } finally { scenery.dispose(); await sim.dispose(); }
 }
+
+assert.equal((await loadPhysicsAssets('http://duckrobe.test/playground/')).xml, assets.xml);
+console.log('PASS cached native meshes retain independent worker ownership and world-specific XML across scene switches');
 
 const circuit = getWorld('circuit'), race = createActivity(circuit);
 const pose = (root, time, fallen = false) => ({ root, time, fallen });

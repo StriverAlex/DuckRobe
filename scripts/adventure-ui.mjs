@@ -6,6 +6,7 @@ import { checkPostcardSharing, checkAlbumSharing, checkLegacyPostcard } from './
 export async function checkAdventures({ page, check, base, appUrl, state, status, chooseWorld }) {
   await check(`${base} real scene postcard, PNG download, album, pause and nested focus`, async () => {
     await page.locator('[data-portrait]').click(); assert.equal((await state()).following, false);
+    assert.equal((await state()).camera.mode, 'portrait'); assert.equal(await page.locator('[data-portrait]').getAttribute('aria-pressed'), 'true');
     await page.locator('[data-photo]').click(); await status('paused');
     assert(await page.locator('.playground-journal').isVisible());
     assert(await page.locator('.playground-footer').evaluate(node => node.inert)); assert.equal((await state()).photos, 1);
@@ -35,14 +36,40 @@ export async function checkAdventures({ page, check, base, appUrl, state, status
     await chooseWorld('park'); await freezeWorker(); await inject(getWorld('park').interactions[0].pos);
     assert(await page.locator('[data-interact]').isEnabled()); await page.locator('[data-interact]').click();
     assert.deepEqual((await state()).interactions.completed, ['garden']); await page.waitForTimeout(100);
-    assert.equal(await page.evaluate(() => window.duckrobe.playground.rig.group.parent.parent.getObjectByName('park-garden-blooms').scale.z), 1);
+    const bloom = () => page.evaluate(() => window.duckrobe.playground.rig.group.parent.parent.getObjectByName('park-garden-blooms').scale.z);
+    assert.equal(await bloom(), .16); await inject(getWorld('park').interactions[0].pos); await page.waitForTimeout(100);
+    const growing = await bloom(); assert(growing > .16 && growing < 1); await page.waitForTimeout(150); assert.equal(await bloom(), growing);
+    await inject(getWorld('park').interactions[0].pos); await page.waitForTimeout(100); assert.equal(await bloom(), 1);
     assert(!(await page.locator('[data-interaction]').isVisible()));
     await chooseWorld('harbor'); await freezeWorker(); const [office, ...destinations] = getWorld('harbor').interactions;
     await inject(destinations[0].pos); assert(await page.locator('[data-interact]').isDisabled());
     await inject(office.pos); await page.locator('[data-interact]').click(); assert((await state()).interactions.carrying);
-    for (const point of destinations) { await inject(point.pos); await page.locator('[data-interact]').click(); }
+    for (const point of destinations) {
+      await inject(point.pos); await page.locator('[data-interact]').click(); await page.waitForTimeout(100);
+      const flag = () => page.evaluate(id => window.duckrobe.playground.rig.group.parent.parent.getObjectByName(`mail-flag:${id}`).rotation.y, point.id);
+      const envelope = () => page.evaluate(id => window.duckrobe.playground.rig.group.parent.parent.getObjectByName(`mail-envelope:${id}`).visible, point.id);
+      assert.equal(await flag(), Math.PI / 2); assert(await envelope()); await page.waitForTimeout(100); assert.equal(await flag(), Math.PI / 2);
+      await inject(point.pos); await page.waitForTimeout(100); assert.equal(await flag(), 0); assert.equal(await envelope(), false);
+    }
     assert.equal((await state()).interactions.delivered.length, 3); assert.equal(await page.locator('.playground-stamps .collected').count(), 3);
     await chooseWorld('park'); assert.deepEqual((await state()).interactions.completed, []); await chooseWorld('circuit');
+  });
+  await check(`${base} landmark cameras preserve looks and adapt to mobile orientation`, async () => {
+    const before = await state();
+    for (const id of ['circuit', 'park', 'harbor']) {
+      await chooseWorld(id); await page.locator('[data-pause]').click(); await status('paused'); await page.locator('[data-scenic]').click();
+      assert.equal((await state()).camera.mode, 'scenic'); assert.equal((await state()).camera.place, id === 'circuit' ? 'finish' : id === 'park' ? 'gate' : 'post-office');
+      assert(!(await page.locator('.playground-paused').isVisible())); assert(await page.locator('.playground-status').isVisible());
+      assert.deepEqual((await state()).selection, before.selection); assert.deepEqual((await state()).colors, before.colors);
+      const wide = (await state()).camera;
+      await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(150);
+      const portrait = (await state()).camera; assert.notDeepEqual(portrait.position, wide.position); assert.equal(portrait.place, wide.place);
+      const sheet = await page.locator('.playground-tools').boundingBox(); assert(sheet.x >= 0 && sheet.x + sheet.width <= 390);
+      await page.setViewportSize({ width: 844, height: 390 }); await page.waitForTimeout(150); assert.equal((await state()).camera.mode, 'scenic');
+      await page.locator('[data-portrait]').click(); assert.equal((await state()).camera.mode, 'portrait');
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await chooseWorld('arena'); assert(await page.locator('[data-scenic]').isDisabled()); await chooseWorld('circuit');
   });
   await check(`${base} lap pose fixtures persist, animate replay, pause and clear records`, async () => {
     await freezeWorker();

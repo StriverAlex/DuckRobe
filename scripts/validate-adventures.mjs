@@ -4,6 +4,8 @@ import { createInteractions } from '../src/playground/interactions.js';
 import { createKeepsakes, validRace, replayPose } from '../src/playground/keepsakes.js';
 import { getWorld } from '../src/playground/worlds.js';
 import { OUTFITS } from '../src/outfits.js';
+import { PerspectiveCamera, Vector3 } from 'three';
+import { nearestPhoto, portraitView, scenicView } from '../src/playground/framing.js';
 
 const pose = (point, time = 1, fallen = false) => ({ root: [...point.slice(0, 2), .12, 1, 0, 0, 0], joints: Array(14).fill(0), time, fallen });
 const circuit = getWorld('circuit'), park = getWorld('park'), harbor = getWorld('harbor');
@@ -54,3 +56,28 @@ const unavailable = createKeepsakes({ getItem() { throw new Error('blocked'); },
 assert.equal(unavailable.addPhoto({ id: 'local', selection: {} }), false); assert.equal(unavailable.photoCount(), 1);
 const corrupt = createKeepsakes({ getItem: () => '{', setItem() {} }); assert.equal(corrupt.photoCount(), 0);
 console.log('PASS keepsakes: bounded album, reload, delete, damaged/blocked storage and in-memory fallback');
+
+function visible(shot, point, radius, aspect) {
+  const camera = new PerspectiveCamera(shot.fov, aspect, .01, 60); camera.position.copy(shot.position); camera.lookAt(shot.target); camera.updateMatrixWorld();
+  for (const axis of [[radius, 0, 0], [-radius, 0, 0], [0, radius, 0], [0, -radius, 0], [0, 0, radius], [0, 0, -radius]]) {
+    const p = point.clone().add(new Vector3(...axis)).project(camera);
+    assert(Math.abs(p.x) < 1 && Math.abs(p.y) < 1 && p.z > -1 && p.z < 1, `camera clips subject at aspect ${aspect}`);
+  }
+}
+for (const aspect of [.26, .46, 1, 1.6, 3.8]) for (const world of [circuit, park, harbor]) {
+  const actor = pose(world.spawn), before = JSON.stringify(world.photos), close = portraitView(actor, aspect);
+  visible(close, new Vector3(actor.root[0], actor.root[2] + .055, -actor.root[1]), .15, aspect);
+  for (const size of [.30, .65]) for (const point of world.photos) {
+    const actor = pose(point.pos), scenic = scenicView(world, actor, aspect, point, size);
+    visible(portraitView(actor, aspect, size), new Vector3(actor.root[0], actor.root[2] + .055, -actor.root[1]), size / 2, aspect);
+    visible(scenic, new Vector3(actor.root[0], actor.root[2] + .055, -actor.root[1]), Math.max(.17, size / 2), aspect);
+    visible(scenic, new Vector3(point.view.focus[0], point.view.focus[2], -point.view.focus[1]), point.view.radius, aspect);
+    assert.equal(scenic.place, point.id); assert.equal(nearestPhoto(world, actor).id, point.id);
+  }
+  assert.equal(JSON.stringify(world.photos), before);
+}
+const straight = portraitView(pose([0, 0]), 1), turned = pose([0, 0]); turned.root[3] = Math.SQRT1_2; turned.root[6] = Math.SQRT1_2;
+const rotated = portraitView(turned, 1);
+assert(Math.abs(rotated.position.x - straight.position.z) < 1e-10); assert(Math.abs(rotated.position.z + straight.position.x) < 1e-10);
+assert.equal(nearestPhoto(getWorld('arena'), turned), null); assert.deepEqual(scenicView(getWorld('arena'), turned, 1), portraitView(turned, 1));
+console.log('PASS framing: rotated outfits and all landmarks fit portrait/landscape screens without mutating scene descriptors');
