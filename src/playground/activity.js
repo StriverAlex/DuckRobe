@@ -28,8 +28,9 @@ export function createActivity(world, { record = null, onLap = () => {} } = {}) 
       if (gate === 0) {
         if (started !== null) {
           const time = pose.time - started; sample(pose, true);
+          const delta = best === null ? null : time - best;
           laps++; best = best === null ? time : Math.min(best, time);
-          lastLap = { duration: time, splits: [...splits, time], lap: laps };
+          lastLap = { duration: time, splits: [...splits, time], lap: laps, finishedAt: pose.time, delta };
           if (samples.length > 1) {
             const completed = { revision: world.revision, ...lastLap, samples };
             if (!record || time < record.duration) record = completed;

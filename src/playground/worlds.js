@@ -30,6 +30,8 @@ const circuitRails = Array.from({ length: 56 }, (_, i) => {
 }).filter((record, i) => i < 22 || i > 25);
 const circuit = {
   id: 'circuit', label: 'worldCircuit', bounds: [2.65, 2.4], spawn: [-.55, -1.1, .12], revision: 2,
+  overview: { direction: [-1.25, -1.4, 1.4], target: [0, .1, .25], scale: 1.48 },
+  atmosphere: { top: 0x83adc7, horizon: 0xe8ecdf, sun: 0xffead0, sky: 0xe5eff9, ground: 0xa99879, fog: 0xe6eadc, power: 2.4, exposure: 1.05 },
   colliders: [box('island_middle', [0, 0, .065], [.6, .75, .065], 'island'),
     cylinder('island_right', [.6, 0, .065], [.75, .065], 'island'), cylinder('island_left', [-.6, 0, .065], [.75, .065], 'island'), ...circuitRails,
     box('pit_back', [1.4, 2.25, .35], [.75, .018, .35], 'building'),
@@ -37,14 +39,16 @@ const circuit = {
     ...[-.72, .72].map((x, i) => box(`pit_post_${i}`, [1.4 + x, 1.67, .38], [.018, .018, .38], 'post'))],
   gates: [{ pos: [0, -1.1], normal: [1, 0], width: .7 }, { pos: [1.7, 0], normal: [0, 1], width: .7 },
     { pos: [0, 1.1], normal: [-1, 0], width: .7 }, { pos: [-1.7, 0], normal: [0, -1], width: .7 }],
-  photos: [{ id: 'finish', label: 'photoFinish', pos: [0, -1.1], radius: 1.1 },
-    { id: 'pit', label: 'photoPit', pos: [1.55, 1.68], radius: .65 }],
+  photos: [{ id: 'finish', label: 'photoFinish', pos: [0, -1.1], radius: 1.1, view: { focus: [0, -1.1, .42], radius: .47, direction: [-1.3, -1.5, .85] } },
+    { id: 'pit', label: 'photoPit', pos: [1.55, 1.68], radius: .65, view: { focus: [1.4, 1.97, .40], radius: .75, direction: [.8, -1.8, .9] } }],
 };
 
 const parkTrees = [[-2.7, -1.6, 1.1], [-2.6, 1.65, 1.3], [-1.5, 2.8, 1.2], [.6, 3, .9], [2.8, 1.8, 1.2], [-1.8, -2.7, 1], [2.8, -1.9, 1]];
 const parkBenches = [[-.95, -2.2, 0], [.95, 2, Math.PI], [-1.95, 1.6, .6], [2, -1.3, -.5]];
 const park = {
   id: 'park', label: 'worldPark', bounds: [3.35, 3.2], spawn: [-.4, -2.2, .12],
+  overview: { direction: [-.9, -1.45, 1.35], target: [0, .1, .32], scale: 1.72 },
+  atmosphere: { top: 0x9abac8, horizon: 0xf0e7d6, sun: 0xffdfb7, sky: 0xe9eff4, ground: 0xb09977, fog: 0xe9e5d6, power: 2.2, exposure: 1.03 },
   trees: parkTrees, benches: parkBenches,
   colliders: [...[[-.9, 0], [.9, 0], [0, .9]].map(([x, y], i) => cylinder(`park_garden_${i}`, [x, y, .045], [.20, .045], 'flowerbed')),
     ...Array.from({ length: 8 }, (_, i) => { const a = i * Math.PI / 4 + Math.PI / 8; return cylinder(`park_gazebo_post_${i}`, [Math.cos(a) * .6, Math.sin(a) * .6, .45], [.015, .45], 'post'); }),
@@ -81,17 +85,23 @@ const park = {
     { id: 'wheel', label: 'parkWheel', pos: [1.05, 1.7], radius: .26 },
     { id: 'carousel', label: 'parkCarousel', pos: [-1.5, 0], radius: .26 }],
   interactions: [{ id: 'garden', type: 'water', label: 'gardenWater', pos: [-1.72, -1.0], radius: .48, target: [-2.1, -1.0, .10] }],
-  photos: [{ id: 'gate', label: 'photoEntrance', pos: [0, -2.2], radius: 1 },
-    { id: 'carousel', label: 'parkCarousel', pos: [-1.5, 0], radius: .65 },
-    { id: 'wheel', label: 'parkWheel', pos: [1.05, 1.7], radius: .70 },
-    { id: 'garden', label: 'parkGarden', pos: [0, 0], radius: .7 }],
+  photos: [{ id: 'gate', label: 'photoEntrance', pos: [0, -2.2], radius: 1, view: { focus: [0, -1.35, .8], radius: .8, direction: [-.6, -2, .65] } },
+    { id: 'carousel', label: 'parkCarousel', pos: [-1.5, 0], radius: .65, view: { focus: [-2.45, 0, .70], radius: .70, direction: [1.2, -1.5, .8] } },
+    { id: 'wheel', label: 'parkWheel', pos: [1.05, 1.7], radius: .70, view: { focus: [1.2, 2.5, 1.05], radius: 1, direction: [-.7, -2, .7] } },
+    { id: 'garden', label: 'parkGarden', pos: [-1.72, -1.0], radius: .7, view: { focus: [-2.1, -1, .22], radius: .38, direction: [1, -1.4, .9] } }],
 };
 const harbor = {
   id: 'harbor', label: 'worldHarbor', bounds: [3.3, 2.4], spawn: [-2.55, -1.55, .12],
+  overview: { direction: [.55, -1.65, 1.25], target: [0, -.2, .3], scale: 1.82 },
+  atmosphere: { top: 0x79acc7, horizon: 0xe3edf0, sun: 0xffefd8, sky: 0xddeefa, ground: 0xc2b598, fog: 0xdae6e8, power: 2.3, exposure: 1.09 },
   colliders: [box('harbor_post_office', [-1.75, .65, .52], [.58, .36, .52], 'building'),
     cylinder('harbor_lighthouse', [2.25, .65, .76], [.27, .76], 'building'),
     box('harbor_cafe', [.05, .74, .38], [.48, .32, .38], 'building'),
     cylinder('harbor_cafe_table', [.28, .08, .08], [.10, .08], 'building'),
+    ...[[.04, .10, -Math.PI / 2], [.53, .12, Math.PI / 2], [.30, -.20, Math.PI]].map(([x, y, yaw], i) => box(`harbor_cafe_chair_${i}`, [x, y, .14], [.065, .055, .14], 'bench', yaw)),
+    box('harbor_menu', [-.68, .33, .20], [.085, .065, .20], 'building'),
+    box('harbor_crate_0', [-2.67, .51, .08], [.13, .12, .08], 'building'),
+    box('harbor_crate_1', [-2.47, .68, .095], [.12, .11, .095], 'building'),
     box('harbor_railing_water', [0, 1.3, .16], [3.3, .02, .16], 'rail'),
     box('harbor_railing_front', [0, -2.4, .16], [3.3, .02, .16], 'rail'),
     box('harbor_railing_left', [-3.3, -.55, .16], [.02, 1.85, .16], 'rail'),
@@ -101,8 +111,9 @@ const harbor = {
     { id: 'cafe', type: 'deliver', label: 'harborCafe', pos: [-.65, -.40], radius: .36 },
     { id: 'quay', type: 'deliver', label: 'harborQuay', pos: [1.10, .22], radius: .36 },
     { id: 'lighthouse', type: 'deliver', label: 'harborLighthouse', pos: [2.60, -1.45], radius: .36 }],
-  photos: [{ id: 'post-office', label: 'harborPostOffice', pos: [-1.75, -.08], radius: .8 },
-    { id: 'lighthouse', label: 'harborLighthouse', pos: [2.25, -.1], radius: 1 }],
+  photos: [{ id: 'post-office', label: 'harborPostOffice', pos: [-1.75, -.08], radius: .8, view: { focus: [-1.75, .65, .65], radius: .72, direction: [.75, -1.8, .75] } },
+    { id: 'cafe', label: 'harborCafe', pos: [.25, -.45], radius: .65, view: { focus: [.05, .74, .46], radius: .6, direction: [.9, -2, .8] } },
+    { id: 'lighthouse', label: 'harborLighthouse', pos: [2.25, -.1], radius: 1, view: { focus: [2.25, .65, .95], radius: .93, direction: [.9, -1.8, .6] } }],
 };
 export const WORLDS = [circuit, park, harbor, arena];
 export function getWorld(id = 'arena') {

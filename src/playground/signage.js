@@ -56,13 +56,16 @@ export function createCircuitSigns() {
   const clock = surface(1024, 224, () => {});
   let previous;
   function update(activity = { elapsed: 0, started: false, laps: 0 }) {
-    const text = formatRaceTime(activity.elapsed), stamp = `${Math.floor(activity.elapsed * 10)}:${activity.started}:${activity.laps}`;
+    const finish = activity.lastLap && activity.elapsed < 4, text = formatRaceTime(finish ? activity.lastLap.duration : activity.elapsed);
+    const delta = activity.lastLap?.delta, footer = finish ? delta === null ? 'FIRST LITTLE LAP' : `${delta <= 0 ? '−' : '+'}${Math.abs(delta).toFixed(2)}s / DEVICE BEST` : activity.best === null || activity.best === undefined ? 'GOOD WALKS / BRIGHTER DAYS' : `BEST ${formatRaceTime(activity.best)}`;
+    const stamp = `${Math.floor(activity.elapsed * 10)}:${activity.started}:${activity.laps}:${footer}`;
     if (stamp === previous) return; previous = stamp;
     const ctx = clock.image.getContext('2d');
     ctx.fillStyle = '#17201e'; ctx.fillRect(0, 0, 1024, 224);
     ctx.fillStyle = '#a69e82'; ctx.font = '500 26px sans-serif'; ctx.letterSpacing = '6px'; ctx.textAlign = 'left'; ctx.fillText('DUCKROBE / CIRCUIT', 35, 37);
-    ctx.textAlign = 'right'; ctx.fillText(`LAP ${String(activity.laps + 1).padStart(2, '0')}`, 989, 37);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.font = '500 146px monospace'; ctx.letterSpacing = '0px'; ctx.fillStyle = '#fff1d5'; ctx.fillText(text, 512, 180);
+    ctx.textAlign = 'right'; ctx.fillText(`${finish ? 'FINISH' : 'LAP'} ${String(finish ? activity.laps : activity.laps + 1).padStart(2, '0')}`, 989, 37);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.font = '500 126px monospace'; ctx.letterSpacing = '0px'; ctx.fillStyle = finish && delta !== null && delta <= 0 ? '#c9e2b5' : '#fff1d5'; ctx.fillText(text, 512, 163);
+    ctx.font = '22px sans-serif'; ctx.fillStyle = '#b8bd9f'; ctx.fillText(footer, 512, 206);
     clock.needsUpdate = true;
   }
   update();
@@ -112,5 +115,11 @@ export function createHarborSigns() {
     drawMark(ctx, 24, 35, 170, '#f4e8cc'); ctx.fillStyle = '#f4e8cc'; ctx.textAlign = 'center'; ctx.font = '600 72px Georgia'; ctx.fillText('DUCKROBE POST', 600, 111);
     ctx.font = '28px Georgia'; ctx.letterSpacing = '7px'; ctx.fillText('LETTERS BY THE SEA', 600, 177);
   });
-  return { mark, post, update() {}, dispose };
+  const menu = surface(384, 640, (ctx, w, h) => {
+    ctx.fillStyle = '#40594c'; ctx.fillRect(0, 0, w, h); ctx.strokeStyle = '#c7b38c'; ctx.lineWidth = 3; ctx.strokeRect(16, 16, w - 32, h - 32);
+    ctx.fillStyle = '#f4ead5'; ctx.textAlign = 'center'; ctx.font = '40px Georgia'; ctx.fillText('SEA SALT', w / 2, 105); ctx.fillText('CAFÉ', w / 2, 160);
+    ctx.font = '29px Georgia'; ['COFFEE', 'LEMON TEA', 'A LITTLE REST'].forEach((line, i) => ctx.fillText(line, w / 2, 280 + i * 63));
+    drawMark(ctx, 132, 477, 120, '#c7b38c');
+  });
+  return { mark, post, menu, update() {}, dispose };
 }

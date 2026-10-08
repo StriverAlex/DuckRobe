@@ -4,8 +4,8 @@ import { ITEMS, selectedItemIds } from '../outfits.js';
 // A public watering can/mail counter keeps every activity available to all looks.
 export function createInteractions(world, selection) {
   const kinds = new Set(ITEMS.filter(item => selectedItemIds(selection).includes(item.id)).map(item => item.kind));
-  let completed = new Set(), carrying = false, previousTime = 0, wateredAt = null;
-  function reset() { completed = new Set(); carrying = false; previousTime = 0; wateredAt = null; }
+  let completed = new Set(), carrying = false, previousTime = 0, wateredAt = null, performedAt = {};
+  function reset() { completed = new Set(); carrying = false; previousTime = 0; wateredAt = null; performedAt = {}; }
   function nearby(pose) {
     if (!pose || pose.fallen) return null;
     if (pose.time < previousTime) reset(); previousTime = pose.time;
@@ -18,10 +18,11 @@ export function createInteractions(world, selection) {
     if (!point || point.type === 'deliver' && !carrying) return null;
     if (point.type === 'letters') carrying = true;
     if (point.type === 'water') wateredAt = pose.time;
+    performedAt[point.id] = pose.time;
     completed.add(point.id);
     return { ...point, personal: point.type === 'water' ? kinds.has('watering') : kinds.has('aviator-satchel') || kinds.has('satchel') };
   }
   return { nearby, perform, reset, getState: () => ({ completed: [...completed], carrying,
-    wateredAt, delivered: (world.interactions || []).filter(point => point.type === 'deliver' && completed.has(point.id)).map(point => point.id),
+    wateredAt, performedAt: { ...performedAt }, delivered: (world.interactions || []).filter(point => point.type === 'deliver' && completed.has(point.id)).map(point => point.id),
     wateringCan: kinds.has('watering'), camera: kinds.has('instant-camera') || kinds.has('camera') }) };
 }

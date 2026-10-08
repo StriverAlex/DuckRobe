@@ -21,19 +21,24 @@ export function createSurfaceMaps(kind) {
     const base = kind === 'asphalt' ? [72, 74, 73] : kind === 'grass' ? [100, 120, 60] : kind === 'wood' ? [207, 191, 166] : kind === 'paint' ? [239, 238, 232] : kind === 'sand' ? [209, 192, 155] : kind === 'roof' ? [215, 221, 207] : [185, 179, 165];
     const pixels = ctx.createImageData(size, size), heights = bump.createImageData(size, size);
     for (let i = 0; i < pixels.data.length; i += 4) {
-      const n = (random() - .5) * (kind === 'asphalt' ? 24 : 15);
-      for (let channel = 0; channel < 3; channel++) { pixels.data[i + channel] = base[channel] + n; heights.data[i + channel] = 165 + n * 3; }
+      const x = i / 4 % size, y = Math.floor(i / 4 / size);
+      const broad = Math.sin(x * Math.PI * 2 / size) * Math.cos(y * Math.PI * 4 / size) * 3;
+      const grain = (random() - .5) * (kind === 'asphalt' ? 24 : 15), n = grain + broad;
+      for (let channel = 0; channel < 3; channel++) { pixels.data[i + channel] = base[channel] + n; heights.data[i + channel] = 165 + grain * 3; }
       pixels.data[i + 3] = heights.data[i + 3] = 255;
     }
     ctx.putImageData(pixels, 0, 0); bump.putImageData(heights, 0, 0);
     if (kind === 'paving' || kind === 'stonePaving') {
       ctx.fillStyle = '#958779'; ctx.fillRect(0, 0, size, size); bump.fillStyle = '#424242'; bump.fillRect(0, 0, size, size);
       for (let row = 0; row < 8; row++) for (let col = -1; col < 5; col++) {
-        const x = col * 128 + (row % 2) * 64, y = row * 64, shade = random() * 28;
-        ctx.fillStyle = kind === 'paving' ? `rgb(${174 + shade},${116 + shade},${87 + shade})` : `rgb(${159 + shade},${151 + shade},${133 + shade})`; ctx.fillRect(x + 2, y + 2, 124, 60);
-        ctx.strokeStyle = '#f3d2aa45'; ctx.lineWidth = 2; ctx.strokeRect(x + 5, y + 5, 118, 54);
+        const x = col * 128 + (row % 2) * 64, y = row * 64, shade = random() * 23, cool = random() * 5;
+        ctx.fillStyle = kind === 'paving' ? `rgb(${178 + shade},${129 + shade + cool},${102 + shade + cool})` : `rgb(${164 + shade},${158 + shade + cool},${143 + shade + cool})`;
+        ctx.beginPath(); ctx.roundRect(x + 2, y + 2, 124, 60, 3); ctx.fill();
+        const face = ctx.createLinearGradient(x, y, x + 128, y + 64); face.addColorStop(0, '#fff8d817'); face.addColorStop(.5, '#00000000'); face.addColorStop(1, '#5748381a');
+        ctx.fillStyle = face; ctx.fillRect(x + 5, y + 5, 118, 54);
         bump.fillStyle = '#999'; bump.fillRect(x + 2, y + 2, 124, 60); bump.fillStyle = '#dedede'; bump.fillRect(x + 5, y + 5, 118, 54);
         for (let i = 0; i < 110; i++) { ctx.fillStyle = i % 2 ? '#4d352c16' : '#ffe7c324'; ctx.fillRect(x + random() * 120 + 4, y + random() * 56 + 4, 1 + random() * 3, 1); }
+        for (let i = 0; i < 3; i++) { ctx.fillStyle = '#6d625d45'; ctx.fillRect(x + 4 + random() * 116, y + (i % 2 ? 2 : 59), 2 + random() * 5, 2); }
       }
     } else if (kind === 'roof') {
       ctx.strokeStyle = '#56615460'; ctx.lineWidth = 3; bump.strokeStyle = '#555'; bump.lineWidth = 4;
@@ -49,6 +54,8 @@ export function createSurfaceMaps(kind) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.bezierCurveTo(x + sway, 170, x - sway, 340, x, size); ctx.stroke();
       }
       for (let i = 0; i < 9; i++) { const x = random() * size, y = random() * size; ctx.strokeStyle = '#6e4e3430'; for (let r = 2; r < 15; r += 3) { ctx.beginPath(); ctx.ellipse(x, y, r * .5, r * 2.5, 0, 0, Math.PI * 2); ctx.stroke(); } }
+    } else if (kind === 'stone') {
+      for (let i = 0; i < 2200; i++) { const x = random() * size, y = random() * size; ctx.fillStyle = i % 3 ? '#675d4922' : '#fff4dd35'; ctx.fillRect(x, y, 1 + random() * 3, 1 + random() * 2); }
     } else if (kind === 'grass') {
       for (let i = 0; i < 18000; i++) {
         const x = random() * size, y = random() * size, v = random();
@@ -65,7 +72,7 @@ export function createSurfaceMaps(kind) {
       ctx.strokeStyle = '#383a3428'; ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(0, 186); ctx.lineTo(160, 200); ctx.lineTo(340, 174); ctx.lineTo(size, 186); ctx.stroke();
     }
   }
-  const texture = source => { const map = new THREE.CanvasTexture(source); map.wrapS = map.wrapT = THREE.RepeatWrapping; return map; };
+  const texture = source => { const map = new THREE.CanvasTexture(source); map.wrapS = map.wrapT = THREE.RepeatWrapping; map.anisotropy = 4; return map; };
   const map = texture(canvas); map.colorSpace = THREE.SRGBColorSpace;
   const repeat = kind === 'grass' ? 1 : ['paving', 'stonePaving'].includes(kind) ? 2 : kind === 'asphalt' ? 2.5 : 1;
   map.repeat.setScalar(repeat);

@@ -17,8 +17,8 @@ function capsule(path, radius) {
 export function createEnvironment(world) {
   const group = new THREE.Group(), geometries = new Map(), materials = new Map(), textures = new Set(), maps = new Map(), instances = new Map();
   group.name = `environment:${world.id}`;
-  let disposed = false, arenaMaterials = [], animations = [], actorShadow, signs;
-  const interactionVisuals = new Map(), raceLights = [];
+  let disposed = false, arenaMaterials = [], animations = [], actorShadow, signs, skyDome;
+  const interactionVisuals = new Map(), deliveries = new Map(), raceLights = [], checkpointMarkers = [], parkMarkers = [];
   const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let seed = 847;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -29,7 +29,7 @@ export function createEnvironment(world) {
       if (kind && !maps.has(kind)) { const surface = createSurfaceMaps(kind); maps.set(kind, surface); for (const map of [surface.map, surface.bumpMap]) if (map) textures.add(map); }
       const surface = maps.get(kind) || {};
       materials.set(key, new THREE.MeshStandardMaterial({ color: ['asphalt', 'grass', 'paving', 'stonePaving'].includes(kind) ? 0xffffff : color, ...surface,
-        roughness: kind === 'asphalt' ? .94 : kind === 'wood' ? .75 : .58, metalness: [0x596266, 0x929997, 0xbac0b7].includes(color) ? .7 : color === 0xba9252 ? .55 : 0,
+        roughness: ['asphalt', 'stone', 'sand'].includes(kind) ? .94 : kind === 'wood' ? .79 : .58, metalness: [0x596266, 0x929997, 0xbac0b7].includes(color) ? .7 : color === 0xba9252 ? .55 : 0,
         ...(kind === 'leaf' ? { side: THREE.DoubleSide, alphaTest: .45, alphaToCoverage: true } : {}),
         ...(kind === 'light' ? { emissive: 0xffb55d, emissiveIntensity: .8 } : {}) }));
     }
@@ -107,6 +107,13 @@ export function createEnvironment(world) {
       instance(sphereGeometry(), material(0xd2ad4f), [px, py, z + .002], [.006, .006, .004]);
     }
   }
+  function verge(points) {
+    const blade = geometry('verge-blade', () => {
+      const s = new THREE.Shape(); s.moveTo(-.003, 0); s.quadraticCurveTo(.005, .035, 0, .055); s.lineTo(.003, 0); s.closePath(); return new THREE.ShapeGeometry(s).rotateX(Math.PI / 2);
+    });
+    const mat = material(0x8c9b63); mat.side = THREE.DoubleSide;
+    for (const [x, y] of points) for (let i = 0; i < 5; i++) instance(blade, mat, [x + (random() - .5) * .025, y + (random() - .5) * .025, .002], [.6 + random() * .6, 1, .35 + random() * .55], [0, 0, random() * Math.PI * 2], new THREE.Color().setHSL(.20, .23, .42 + random() * .15));
+  }
   function ground(kind) {
     const plane = geometry('ground', () => {
       const g = new THREE.PlaneGeometry(120, 120), uv = g.attributes.uv, p = g.attributes.position;
@@ -156,7 +163,7 @@ export function createEnvironment(world) {
   }
   function sky() {
     const mat = new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false,
-      uniforms: { top: { value: new THREE.Color(0x6ea9d0) }, bottom: { value: new THREE.Color(0xd7e3e5) } },
+      uniforms: { top: { value: new THREE.Color(world.atmosphere?.top || 0x6ea9d0) }, bottom: { value: new THREE.Color(world.atmosphere?.horizon || 0xd7e3e5) } },
       vertexShader: 'varying vec3 direction; void main() { direction = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: `varying vec3 direction; uniform vec3 top; uniform vec3 bottom;
         void main() { float h = pow(max(normalize(direction).z, 0.0), .25); gl_FragColor = vec4(mix(bottom, top, h), 1.0);
@@ -165,6 +172,7 @@ export function createEnvironment(world) {
         }` });
     materials.set('sky', mat);
     const dome = mesh(geometry('sky', () => new THREE.SphereGeometry(45, 24, 16)), mat, [0, 0, 0]); dome.castShadow = dome.receiveShadow = false;
+    skyDome = dome;
     if (typeof document === 'undefined') return;
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 256;
     const ctx = canvas.getContext('2d');
@@ -253,6 +261,7 @@ export function createEnvironment(world) {
     world.gates.slice(1).forEach((gate, index) => {
       const yaw = Math.atan2(gate.normal[1], gate.normal[0]);
       const line = box([...gate.pos, .006], [.025, gate.width, .004], 0xd89a57); line.rotation.z = yaw; line.castShadow = false;
+      line.material = material(0xd89a57).clone(); materials.set(`checkpoint:${index}`, line.material); checkpointMarkers.push({ line, gate: index + 1 });
       const sign = new THREE.Group(); sign.position.set(gate.pos[0] + gate.normal[1] * .45, gate.pos[1] - gate.normal[0] * .45, .15);
       sign.rotation.z = yaw + Math.PI; group.add(sign);
       cylinder([0, 0, 0], .012, .30, 0x596266, sign); label(String(index + 1).padStart(2, '0'), [0, -.016, .16], [.13, .07], {}, sign);
@@ -266,6 +275,7 @@ export function createEnvironment(world) {
     bench(.32, -.37, -.08, .13); bench(-1.35, 1.75, -.35); bench(-1.75, -1.78, -.12);
     for (const [x, y] of [[-2.3, 1.05], [2.6, 2.3], [-2.35, -1.8], [-.2, 2.1]]) tree(x, y, .95);
     pit();
+    circuitWear();
     paving([1.62, 1.58, -.0005], [.57, .82], 'stonePaving');
     label('PIT ENTRY', [1.64, 1.45, .10], [.29, .07], { background: '#dfd1b4', color: '#40594c' });
     for (const [x, y] of [[-1.7, -1.36], [1.95, -.8], [.85, 1.56], [-1.7, .8]]) { tires(x, y); tires(x + .17, y + .05, 2); cone(x - .19, y); }
@@ -367,6 +377,23 @@ export function createEnvironment(world) {
     for (const x of [-.15, .15]) { beam([x, -.08, 0], [x, 0, .58], .013, 0xb28b5a, sign); beam([x, .18, 0], [x, 0, .58], .013, 0xb28b5a, sign); }
     mesh(boxGeometry(), wood, [0, 0, .37], [.35, .035, .46], sign); graphic(signs?.motto, [0, -.02, .37], [.305, .419], sign);
     for (let i = 0; i < 4; i++) { const mark = box([1.56 + i * .12, 1.52, .004], [.015, .23, .002], 0xc5a45d); mark.rotation.z = -.50; mark.castShadow = false; }
+    const cable = geometry('pit-cable', () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[.42, .27, .41], [.56, .22, .13], [.48, -.05, .012], [.65, -.13, .012], [.56, -.24, .012]].map(p => new THREE.Vector3(...p))), 30, .004, 6, false));
+    mesh(cable, material(0x37433a), [0, 0, 0], [1, 1, 1], base);
+    for (const x of [-.43, -.30]) { const wrench = box([x, .07, .386], [.010, .090, .006], 0xbac0b7, base); wrench.rotation.z = -.3; ring(.014, .003, [x + .012, .10, .387], 0xbac0b7, base); }
+    label('SERVICE / 01', [.52, -.028, .31], [.15, .034], { background: '#ab5845', color: '#f3e7c9' }, base);
+  }
+  function circuitWear() {
+    const skidMaterial = new THREE.MeshStandardMaterial({ color: 0x252d2b, transparent: true, opacity: .16, depthWrite: false, roughness: 1 }); materials.set('skids', skidMaterial);
+    for (const start of [.13, .53]) for (const offset of [-.028, .028]) {
+      const points = Array.from({ length: 20 }, (_, i) => { const p = circuitPoint(start + i * .0022, 1.13 + offset); return new THREE.Vector3(...p, .009); });
+      const skid = mesh(geometry(`skid:${start}:${offset}`, () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 36, .004, 4, false)), skidMaterial, [0, 0, 0]); skid.castShadow = skid.receiveShadow = false;
+    }
+    const pebbles = material(0xc5bea7, 'stone');
+    for (let i = 0; i < 160; i++) {
+      const p = circuitPoint(random(), .765 + random() * .018);
+      instance(sphereGeometry(), pebbles, [...p, .012], [.005 + random() * .007, .004, .003]);
+    }
+    verge(Array.from({ length: 260 }, () => circuitPoint(random(), 1.53 + random() * .10)));
   }
   function beam(a, b, radius, color, parent = group) {
     const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b), axis = end.clone().sub(start);
@@ -521,9 +548,11 @@ export function createEnvironment(world) {
       if (Math.abs(p) > .9) leaves([p, -3.36, .24], .22, .48, 170);
     }
     bunting([-2.8, 1.3, 1.0], [2.8, 1.7, 1.05]);
+    verge(Array.from({ length: 200 }, () => { const a = random() * Math.PI * 2; return [Math.cos(a) * 1.91, Math.sin(a) * 1.91]; }));
     world.stops.forEach((stop, index) => {
       const circle = geometry('stop', () => new THREE.RingGeometry(.105, .12, 32));
       const marker = mesh(circle, material(0xd89a57), [...stop.pos, .006]); marker.castShadow = false;
+      marker.material = marker.material.clone(); materials.set(`park-stop:${stop.id}`, marker.material); parkMarkers.push({ marker, id: stop.id });
       const sign = new THREE.Group(); sign.position.set(stop.pos[0] * 1.32 - stop.pos[1] * .30, stop.pos[1] * 1.32 + stop.pos[0] * .30, .15); sign.rotation.z = Math.atan2(stop.pos[0], -stop.pos[1]); group.add(sign);
       cylinder([0, 0, 0], .012, .30, 0x596266, sign); label(String(index + 1).padStart(2, '0'), [0, -.016, .16], [.13, .07], {}, sign);
     });
@@ -550,13 +579,9 @@ export function createEnvironment(world) {
   function harbor() {
     signs = createHarborSigns(); ground('sand'); world.colliders.forEach(collider);
     paving([0, -.55, -.001], [6.6, 3.7], 'stonePaving');
-    const sea = mesh(geometry('harbor-sea', () => new THREE.PlaneGeometry(80, 80)), material(0x779fa4), [0, 41.36, -.009]); sea.castShadow = false;
-    for (let i = 0; i < 50; i++) {
-      const wave = box([(random() - .5) * 16, 1.5 + random() * 8, -.003], [.18 + random() * .4, .009, .001], 0xb0c6be); wave.castShadow = false;
-      if (!reducedMotion) animations.push(time => { wave.scale.x = 1 + Math.sin(time * .5 + i) * .12; });
-    }
+    harborWater();
     for (let i = 0; i < 32; i++) box([-3.2 + i * .205, 1.36, -.04], [.198, .14, .08], 0xb8ab91);
-    harborPostOffice(); harborCafe(); lighthouse();
+    harborPostOffice(); harborCafe(); lighthouse(); harborDetails();
     for (const record of world.colliders.filter(record => record.name.startsWith('harbor_mailbox'))) {
       const mail = new THREE.Group(); mail.position.set(record.pos[0], record.pos[1], 0); group.add(mail);
       cylinder([0, 0, .09], .024, .18, 0x315975, mail); box([0, 0, .28], [.15, .14, .23], 0xb16f57, mail);
@@ -564,6 +589,12 @@ export function createEnvironment(world) {
       const lid = box([0, 0, .405], [.18, .18, .035], 0x315975, mail); lid.rotation.x = -.1;
       const index = Number(record.name.at(-1)), stamp = label('✓', [0, -.086, .25], [.07, .055], { background: '#40594c' }, mail);
       if (stamp) { stamp.visible = false; interactionVisuals.set(world.interactions[index + 1].id, stamp); }
+      const id = world.interactions[index + 1].id, flag = new THREE.Group(); flag.name = `mail-flag:${id}`; flag.position.set(.089, .025, .32); mail.add(flag);
+      cylinder([0, 0, .035], .003, .07, 0xba9252, flag); box([.025, 0, .065], [.05, .007, .030], 0xc6a766, flag); flag.rotation.y = Math.PI / 2;
+      const envelope = new THREE.Group(); envelope.name = `mail-envelope:${id}`; mail.add(envelope); envelope.visible = false;
+      box([0, 0, 0], [.066, .004, .045], 0xf4ead5, envelope);
+      beam([-.031, -.003, .020], [0, -.003, -.004], .0009, 0x9c7560, envelope); beam([.031, -.003, .020], [0, -.003, -.004], .0009, 0x9c7560, envelope);
+      box([.021, -.003, .009], [.010, .002, .012], 0x789387, envelope); deliveries.set(id, { flag, envelope, stamp });
     }
     for (const action of world.interactions) {
       const marker = mesh(geometry('harbor-action-ring', () => new THREE.RingGeometry(.14, .16, 32)), material(0xc6a766), [...action.pos, .004]); marker.castShadow = false;
@@ -578,6 +609,68 @@ export function createEnvironment(world) {
     paving([1.15, 2.25, .035], [.48, 1.8], 'wood');
     for (const y of [1.55, 2.35, 3.05]) for (const x of [.85, 1.45]) { cylinder([x, y, .1], .028, .32, 0x957d5c); ring(.028, .005, [x, y, .22], 0xe4d7b8); }
     sailboat(-.75, 2.28, .70, -.16); sailboat(2.15, 3.8, .52, .28);
+  }
+  function harborWater() {
+    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, deep: { value: new THREE.Color(0x4e8998) }, shallow: { value: new THREE.Color(0x9cc3bd) }, sky: { value: new THREE.Color(world.atmosphere.horizon) } }]);
+    const water = new THREE.ShaderMaterial({ uniforms, fog: true,
+      vertexShader: `varying vec2 seaPoint; varying vec3 worldPoint;
+        #include <fog_pars_vertex>
+        void main() { seaPoint = position.xy + vec2(0.0, 41.36); worldPoint = (modelMatrix * vec4(position, 1.0)).xyz;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `uniform float time; uniform vec3 deep; uniform vec3 shallow; uniform vec3 sky;
+        varying vec2 seaPoint; varying vec3 worldPoint;
+        #include <fog_pars_fragment>
+        void main() {
+          vec2 p = seaPoint; float a = p.x * 5.8 + p.y * 3.1 - time * .65, b = p.x * 2.3 - p.y * 6.1 + time * .48;
+          vec3 normal = normalize(vec3(-cos(a) * .10 - cos(b) * .055, 1.0, cos(a) * .055 - cos(b) * .11));
+          vec3 view = normalize(cameraPosition - worldPoint), light = normalize(vec3(-.4, 1.0, .6));
+          float fresnel = pow(1.0 - max(dot(normal, view), 0.0), 4.0);
+          float glint = pow(max(dot(normal, normalize(view + light)), 0.0), 100.0);
+          float coast = exp(-max(p.y - 1.36, 0.0) * .30);
+          vec3 color = mix(deep, shallow, coast * .8) + (sin(a) * sin(b)) * .017;
+          color = mix(color, sky, fresnel * .48); color += glint * .28;
+          float foam = exp(-abs(p.y - 1.36) * 23.0) * (.30 + .35 * sin(p.x * 8.0 + time * .6));
+          gl_FragColor = vec4(mix(color, vec3(.82, .86, .75), foam), 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }` });
+    materials.set('harbor-water', water);
+    const sea = mesh(geometry('harbor-sea', () => new THREE.PlaneGeometry(80, 80)), water, [0, 41.36, -.009]); sea.name = 'harbor-water'; sea.castShadow = sea.receiveShadow = false;
+    animations.push(time => { uniforms.time.value = reducedMotion ? 0 : time; });
+  }
+  function harborDetails() {
+    const wood = material(0xb89c78, 'wood');
+    paving([1.6, 1.04, .002], [3.1, .48], 'wood');
+    for (let i = 0; i < 16; i++) { const seam = box([.12 + i * .19, 1.04, .003], [.003, .48, .002], 0x87735b); seam.castShadow = false; }
+    for (const record of world.colliders.filter(record => record.name.startsWith('harbor_crate_'))) {
+      const crate = new THREE.Group(); crate.position.fromArray(record.pos); group.add(crate); const [w, d, h] = record.size;
+      mesh(boxGeometry(), wood, [0, 0, 0], [2 * w, 2 * d, 2 * h], crate);
+      for (const z of [-h * .6, 0, h * .6]) box([0, -d - .002, z], [2 * w, .012, .006], 0x927955, crate);
+      for (const x of [-w * .75, w * .75]) box([x, -d - .007, 0], [.016, .012, 2 * h], 0xc3ae89, crate);
+      label('DUCKROBE / POST', [0, -d - .015, .015], [w * 1.4, .044], { background: '#b89c78', color: '#536450' }, crate);
+    }
+    for (const record of world.colliders.filter(record => record.name.startsWith('harbor_cafe_chair_'))) {
+      const chair = new THREE.Group(); chair.position.set(record.pos[0], record.pos[1], 0); chair.rotation.z = record.yaw; group.add(chair);
+      for (const x of [-.052, .052]) for (const y of [-.042, .042]) cylinder([x, y, .08], .006, .16, 0x40594c, chair);
+      mesh(boxGeometry(), wood, [0, 0, .165], [.13, .11, .018], chair);
+      for (const x of [-.052, .052]) cylinder([x, .045, .215], .005, .13, 0x40594c, chair);
+      for (const z of [.23, .27]) mesh(boxGeometry(), wood, [0, .046, z], [.12, .014, .020], chair);
+    }
+    const menu = world.colliders.find(record => record.name === 'harbor_menu'), stand = new THREE.Group(); stand.position.set(menu.pos[0], menu.pos[1], 0); group.add(stand);
+    for (const x of [-.075, .075]) { beam([x, -.035, 0], [x, 0, .40], .007, 0x8d795b, stand); beam([x, .06, 0], [x, 0, .40], .007, 0x8d795b, stand); }
+    mesh(boxGeometry(), wood, [0, 0, .24], [.17, .035, .30], stand); graphic(signs?.menu, [0, -.019, .24], [.15, .275], stand);
+    const buoy = ring(.125, .026, [-2.85, 1.255, .34], 0xf0e1bd, group, true);
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; const band = box([-2.85 + Math.cos(a) * .125, 1.23, .34 + Math.sin(a) * .125], [.047, .046, .045], 0xae6956); band.rotation.y = -a; }
+    const rope = geometry('harbor-rope', () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[-2.85, 1.24, .51], [-2.96, 1.23, .60], [-3.04, 1.23, .36], [-2.98, 1.23, .15]].map(p => new THREE.Vector3(...p))), 24, .0035, 6, false));
+    mesh(rope, material(0xc3ae89), [0, 0, 0]); buoy.name = 'harbor-life-buoy';
+    for (const x of [.85, 1.45]) for (let i = 0; i < 3; i++) ring(.031, .003, [x, 1.55, .23 + i * .006], 0xc7b38c);
+    const mooring = geometry('mooring-line', () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[.85, 2.35, .20], [.3, 2.1, .07], [-.42, 2.26, .11]].map(p => new THREE.Vector3(...p))), 28, .003, 6, false)); mesh(mooring, material(0xc7b38c), [0, 0, 0]);
+    label('01 / POST', [-.65, -.112, .24], [.078, .036], { background: '#e9dfc9', color: '#315975' });
+    verge(Array.from({ length: 90 }, (_, i) => [-3.2 + i * .072, -2.36 + (random() - .5) * .02]));
+    for (const [x, y] of [[-3.05, .85], [3.05, .15], [1.55, -1.95]]) { flowers(x, y, .07, 0, 0xe5dbc0); }
   }
   function pitchedRoof(pos, width, depth, height, color, parent) {
     const shape = new THREE.Shape(); shape.moveTo(-width / 2, 0); shape.lineTo(0, height); shape.lineTo(width / 2, 0); shape.closePath();
@@ -638,8 +731,9 @@ export function createEnvironment(world) {
     for (let i = 0; i < count; i++) {
       const a = i * Math.PI * 2 / count, block = mesh(boxGeometry(), material(0xd3c4a9, 'stone'), [x + Math.cos(a) * radius, y + Math.sin(a) * radius, z], [radius * Math.PI * 2 / count - .003, .025, height * 2]); block.rotation.z = a + Math.PI / 2;
     }
-    leaves([x, y, top + .19], radius * .58, .34, 650);
-    for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; flowers(x + Math.cos(a) * radius * .67, y + Math.sin(a) * radius * .67, radius * .25, top, [0xf3ead4, 0xd4a0a1, 0xbcb0cf][i % 3]); }
+    const palette = x < -1 ? [0xbcb0cf, 0xf3ead4] : y > 1 ? [0xe2c278, 0xf3ead4] : [0xd4a0a1, 0xf3ead4], heightVariation = radius > .35 ? .36 : .19;
+    leaves([x - radius * .13, y + radius * .10, top + heightVariation / 2], radius * .48, heightVariation, 470);
+    for (let i = 0; i < 7; i++) { const a = i * 2.39996; flowers(x + Math.cos(a) * radius * .67, y + Math.sin(a) * radius * .67, radius * (.16 + random() * .08), top, palette[i % 2]); }
   }
   function parkBanner(x, y) {
     beam([x, y, .98], [x + .24, y, .98], .006, 0x344540);
@@ -760,10 +854,21 @@ export function createEnvironment(world) {
     animations.forEach(animate => animate(pose.time));
     signs?.update(activity);
     for (const { lens, green } of raceLights) { lens.material.emissive.setHex(green ? 0x668c64 : 0xb87c38); lens.material.emissiveIntensity = (green ? pose.time >= 3 : pose.time < 3) ? 1.7 : 0; }
+    for (const { line, gate } of checkpointMarkers) { line.material.emissive.setHex(0xd5af64); line.material.emissiveIntensity = activity.started && activity.nextGate === gate ? .32 : 0; }
+    for (const { marker, id } of parkMarkers) marker.material.color.setHex(activity.stamps.includes(id) ? 0x789b72 : 0xd89a57);
     for (const [id, visual] of interactionVisuals) {
       if (['water-drops', 'public-can'].includes(id)) continue;
       const done = interactions.completed.includes(id);
-      if (world.id === 'park') visual.scale.z = done ? 1 : .16; else visual.visible = done;
+      if (world.id === 'park') {
+        const elapsed = pose.time - (interactions.wateredAt ?? Infinity), f = reducedMotion ? 1 : THREE.MathUtils.smoothstep(elapsed, 0, 1.4);
+        visual.scale.z = done ? .16 + .84 * f : .16;
+      } else visual.visible = done;
+    }
+    for (const [id, { flag, envelope, stamp }] of deliveries) {
+      const done = interactions.completed.includes(id), elapsed = pose.time - (interactions.performedAt?.[id] ?? Infinity), f = reducedMotion ? 1 : THREE.MathUtils.smoothstep(elapsed, 0, .75);
+      flag.rotation.y = done ? (1 - f) * Math.PI / 2 : Math.PI / 2;
+      envelope.visible = done && elapsed >= 0 && elapsed < .75 && !reducedMotion;
+      envelope.position.set(0, -.16 + .13 * f, .37 - .10 * f); if (stamp) stamp.visible = done && f === 1;
     }
     const drops = interactionVisuals.get('water-drops');
     if (drops) drops.visible = interactions.completed.includes('garden') && pose.time - (interactions.wateredAt ?? -Infinity) < 2 && !reducedMotion;
@@ -787,5 +892,5 @@ export function createEnvironment(world) {
     batch.castShadow = batch.receiveShadow = true; batch.computeBoundingSphere(); group.add(batch);
   }
   instances.clear();
-  return { group, update, dispose };
+  return { group, sky: skyDome, update, dispose };
 }
