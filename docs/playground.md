@@ -15,7 +15,8 @@ the captured selection and body colors.
 | Follow camera | Toggle tracking of the duck's position |
 | Environment selector | Switch between miniature circuit, amusement park, sea salt harbor and classic arena |
 | Overview | Frame the whole environment; disable following |
-| Outfit close-up | Frame the duck at its real position; disable following |
+| Outfit close-up | Frame the complete outfit at the duck's real position and rotate with its heading |
+| Landmark portrait | Frame the duck with the nearest scene landmark; adapt to portrait/landscape viewports |
 | Take a photo | Pause and capture a UI-free scene postcard; download PNG or keep it in the local album |
 | Travel album | Browse the latest eight local postcards, download, remove or wear a captured look |
 | Best lap replay / Clear record | Toggle a render-only replay or remove the device's circuit record |
@@ -47,7 +48,11 @@ open pit pavilion with tools, tire stacks and cones. A break in the guardrail
 and flat branch connect the circuit to its contact-enabled pit workshop. Navy cloth flags, the
 workshop banner and stone markers use the DuckRobe head mark. The gantry has
 two readable clock faces, metal bracing, mounting bolts and signal lenses;
-its display shares the HUD's lap state and time formatting. Flags ripple on
+its display shares the HUD's lap state and time formatting. A completed lap
+holds its finish time and difference from the previous device best for four
+simulation seconds. The next checkpoint gains a soft glow. Subtle skid traces,
+curb pebbles, verge grass and workshop cables/tools add surface detail without
+changing the walking route. Flags ripple on
 simulation time and remain still with reduced motion enabled. Both edges have painted
 curbs, and route arrows show the direction. Cross the checkerboard line in the forward direction to start the
 clock. Visit the numbered checkpoints 1–3 in order, then cross the start line
@@ -85,21 +90,41 @@ the pinned flat-ground walking policy.
 The play fence has a walking entrance, while the central garden now has small
 separate beds and a flush pavilion floor with a clear front approach. Near the
 garden's can station, choose **Use your watering can** or **Borrow a can and
-water**. Taller blossoms open once per visit/reset; a short water effect and
+water**. Taller blossoms open gradually over 1.4 simulation seconds once per
+visit/reset; regional flower palettes and heights vary between beds, and
+collected ground markers turn sage green. A short water effect and
 can tilt use simulation time and respect reduced motion. Clothing is still
 decorative in the physical model.
 
 **Sea salt harbor:** a flat stone promenade with a branded blue post office,
 awning café, striped lighthouse, three mailboxes, quay railings, a timber
-jetty and gently moving decorative sailboats. Collect three postcards at the
+jetty and gently moving decorative sailboats. Café chairs, a menu board,
+postal crates, a life buoy, mooring ropes and an inset timber waterfront add
+detail around the clear walking paths. The sea has procedural ripples,
+view-dependent glints and a lighter shoreline. Collect three postcards at the
 post office, then explicitly deliver to the café, quay and lighthouse gold
 markers. Delivery before collection is disabled, and each location counts
-once. The HUD and mailbox receipts reflect the delivered count; reset or
+once. An envelope slides into the mailbox and its flag rises over .75
+simulation seconds; a receipt remains after delivery. The HUD and mailbox
+receipts reflect the delivered count; reset or
 scene switching clears the route. The quay railing keeps the walking area
 separate from the decorative sea and jetty. Mail delivery works with every
 outfit; the existing mail-satchel looks suit the scene without changing physics.
 
+Each outdoor scene has its own sky, sunlight, hemisphere fill and exposure.
+Overview angles separate the park entrance from the pavilion and show the
+harbor waterfront. Surface maps use muted colors, fine grain and worn edges.
+Water, flowers and mail feedback freeze with the simulation and respect
+reduced motion. Paused shadow maps are reused until the scene changes.
+
 ## Little travel postcards
+
+**Outfit close-up** keeps tall hats, wide garments and accessories in view;
+**Landmark portrait** frames the duck and the closest configured landmark
+together. Both reframe after a viewport orientation change. Dragging resumes
+manual camera control. In these photo views, the header and Resume button
+retain the paused state while the duplicate scene badge is hidden to leave
+the photograph visible.
 
 Photography captures the actual WebGL scene at the selected camera without
 the DOM controls. The 1400×1200 PNG includes a cream border, place, outfit,
@@ -168,7 +193,9 @@ download URLs, sharing and album UI. Scene/visit disposal closes panels, aborts 
 and revokes owned URLs. These modules do not write to the physics worker.
 
 `worlds.js` defines spawn points, bounds, static contacts and activity locations
-in metres and native Z-up coordinates. `environment.js` builds procedural
+in metres and native Z-up coordinates, plus atmosphere, overview and landmark
+framing descriptors. `framing.js` fits subjects in camera space and converts
+native coordinates at the rendering boundary. `environment.js` builds procedural
 Three.js scenery and owns its geometry, materials, textures and animations;
 `model.js` creates MuJoCo contacts from the same records. Box half-sizes and
 native yaw/roll are shared, with one Z-up → Y-up render wrapper. Trees,
@@ -185,7 +212,8 @@ default for `preparePhysicsXml()` and baseline physics validation.
 
 The dedicated module worker lazily loads MuJoCo and ONNX Runtime concurrently.
 The main thread prepares collision STL buffers from the pinned GLB, caches one
-successful model, and transfers independent copies to each new worker. Failed
+successful native mesh source, compiles each world's contacts/spawn into its
+own XML, and transfers independent mesh copies to each new worker. Failed
 or aborted preparations are not cached. The visual rig copies the wardrobe's
 prepared native geometry and rebuilds its reference pose with independent
 materials. Runtime initialization overlaps graphics setup and arena rendering.
@@ -280,6 +308,31 @@ Little-adventures verification on 2026-10-04:
 | Existing wardrobe browser suite | 18/18 passed on a fixed root production build with Metal; original moves, saved looks and real model ZIP download; zero browser errors |
 | Real visual captures | Desktop, 390×844 portrait and 844×390 landscape; native spawn poses, no pose fixtures |
 
+Scene-polish verification on 2026-10-06:
+
+| Check | Result |
+| --- | --- |
+| Native-world contacts and walking | Passed; 59 circuit, 61 park and 17 harbor contacts; all three delivery approaches use the actual walking policy |
+| Camera and interaction logic | Passed; heading-aware outfit framing, landmark bounds across five aspect ratios, gradual flowers/mail and paused simulation time |
+| Playground browser suite | 44/44 passed; root and Pages base, mobile cameras, pause/reset, scenery feedback and existing postcard/record behavior |
+| Wardrobe, studio and exports | Passed; 18 wardrobe browser checks, 7 studio checks, catalog/fit/behavior/assets and 127 export cases |
+| Real visual review | All three maps in desktop, 390×844 portrait and 844×390 landscape; sailor, garden pack, linen dress and wizard looks |
+| Postcard compatibility | Original PNG, 700px image and stored JPEG decoded with an independent QR reader; exact fresh-recipient outfit/colors restored |
+
+Upstream-integration verification on 2026-10-08, based on `11a106b`:
+
+| Check | Result |
+| --- | --- |
+| Runtime and native geometry | Passed; concurrent runtime setup, independent rig copies and exact expanded triangles/normals retained |
+| Cached world isolation | Passed; every scene receives its own contacts/spawn XML and independently transferable mesh buffers; returning to the arena restores its original XML |
+| Playground browser suite | 46/46 passed on root and Pages; includes idle paused rendering, scene switching, camera framing and exact postcard outfit restoration |
+| Wardrobe, studio, exports and build | Passed; 18 wardrobe and 7 studio checks, catalog/behavior/fit/assets, 127 export cases and production build |
+
+The circuit's first/repeat-entry profiler completed at pixel ratios 1 and 2
+using a local Metal adapter on Apple M4. The default SwiftShader run timed out;
+a retry produced one sample before being stopped because software rendering
+was very slow. These runs do not establish a before/after performance gain.
+
 The build retains the existing large-main-chunk warning. Run physics and
 browser checks locally using [the contribution workflow](../CONTRIBUTING.md).
 The Pages workflow builds and deploys the site; it does not run validation.
@@ -292,6 +345,8 @@ outfits are checked for anchor transforms, colors and body-frame compatibility.
 Run `npm run check:adventures` for completed-lap recording, sector times,
 record persistence/versioning, replay interpolation, proximity actions,
 personal/borrowed watering, delivery order and bounded/storage-fallback albums.
+It also projects outfit/landmark bounds across narrow portrait and wide
+landscape aspects and checks heading-aware close-ups.
 
 Run `npm run check:worlds` for real compiled environment contacts and rendered
 transforms, unchanged robot masses/inertias/actuator parameters, scene spawn
