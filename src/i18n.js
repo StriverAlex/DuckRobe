@@ -1,5 +1,6 @@
 const copy = {
   worldHarbor: ['Sea salt harbor', '海盐港湾'],
+  travelScenic: ['Landmark portrait', '地标合影'],
   travelPhoto: ['Your little postcard', '小鸭旅行明信片'], travelTake: ['Take a photo', '拍张照片'], travelAlbum: ['Travel album', '旅行册'],
   travelClose: ['Close and return', '关闭并返回'], travelDownload: ['Download PNG', '下载 PNG'], travelDelete: ['Remove', '移除'], travelWear: ['Wear this look', '穿回这身'],
   travelShare: ['Share this look', '分享这身穿搭'], travelSend: ['Share postcard', '分享明信片'], travelLookLink: ['A link to the whole look', '同款穿搭链接'], travelCopy: ['Copy look link', '复制穿搭链接'],

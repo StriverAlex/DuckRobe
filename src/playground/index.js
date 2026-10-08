@@ -14,6 +14,7 @@ import { createInteractions } from './interactions.js';
 import { createKeepsakes } from './keepsakes.js';
 import { createReplay } from './replay.js';
 import { createPhotography } from './photography.js';
+import { nearestPhoto, portraitView, scenicView } from './framing.js';
 
 function disposeTree(root) {
   const geometries = new Set(), materials = new Set();
@@ -26,7 +27,7 @@ function disposeTree(root) {
 
 export function createPlayground({ host, selection, colors, language, sourceRig, lookName = '', onExit, onWear, worldId = 'circuit' }) {
   const tr = (key, vars) => t(key, language, vars), chosen = normalizeSelection(selection);
-  let selectedWorld = getWorld(worldId).id, overview = false;
+  let selectedWorld = getWorld(worldId).id, overview = false, cameraMode = 'follow';
   const inputs = new AbortController(), keys = new Set(), pointers = new Map(), pulses = new Set();
   const directions = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
   let disposed = false, current, status = 'loading', follow = true, latestPose = null, stage = 'assets';
@@ -42,7 +43,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         <span class="playground-status" data-status role="status" aria-live="polite"></span>
       </header>
       <div class="playground-activity" data-activity hidden><strong data-activity-title></strong><span data-activity-detail></span><div class="playground-stamps" data-stamps></div><span data-race-splits></span><div class="playground-race-tools" data-race-tools hidden><button data-replay aria-pressed="false">${tr('raceReplay')}</button><button data-clear-record>${tr('raceClear')}</button></div></div>
-      <div class="playground-tools"><button data-portrait disabled>${tr('travelPortrait')}</button><button data-photo disabled>${tr('travelTake')}</button><button data-album>${tr('travelAlbum')}</button></div>
+      <div class="playground-tools"><button data-portrait aria-pressed="false" disabled>${tr('travelPortrait')}</button><button data-scenic aria-pressed="false" disabled>${tr('travelScenic')}</button><button data-photo disabled>${tr('travelTake')}</button><button data-album>${tr('travelAlbum')}</button></div>
       <div class="playground-interaction" data-interaction hidden><span data-interaction-hint></span><button data-interact disabled></button></div>
       <div class="playground-notice" data-notice role="status" aria-live="polite" hidden></div>
       <div class="playground-message" data-message role="status" aria-live="polite">
@@ -72,7 +73,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   const post = message => current?.worker?.postMessage(message);
   const photography = createPhotography({ view, tr, language, keepsakes, pause, onWear, snapshot: () => {
     if (!current?.rig || !['running', 'paused'].includes(status)) return null;
-    const point = (current.world.photos || []).find(point => Math.hypot(latestPose.root[0] - point.pos[0], latestPose.root[1] - point.pos[1]) <= point.radius);
+    const point = cameraMode === 'scenic' ? current.photoPoint : (current.world.photos || []).find(point => Math.hypot(latestPose.root[0] - point.pos[0], latestPose.root[1] - point.pos[1]) <= point.radius);
     const date = new Date(), interaction = current.interactions.getState(), activity = current.activity.getState();
     return { renderer: current.renderer, scene: current.scene, camera: current.camera, worldId: current.world.id,
       place: tr(point?.label || current.world.label), look: lookName || tr('mixName'), date: date.toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-GB'), isoDate: date.toISOString(),
@@ -92,6 +93,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   function clearInputs() { keys.clear(); pointers.clear(); pulses.forEach(clearTimeout); pulses.clear(); movement(); }
   function setStatus(next, detail = '') {
     status = next; view.dataset.playgroundStatus = next;
+    if (current) current.renderDirty = true;
     const loading = next === 'loading', error = next === 'error', fallen = next === 'fallen';
     find('[data-status]').textContent = tr({ loading: 'playgroundLoading', running: 'playgroundLive', paused: 'playgroundPaused', fallen: 'playgroundFallen', error: 'playgroundError' }[next]);
     find('[data-message]').hidden = !loading && !error && !fallen;
@@ -106,6 +108,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     find('[data-follow]').disabled = loading || error;
     find('[data-overview]').disabled = loading || error;
     find('[data-portrait]').disabled = loading || error;
+    find('[data-scenic]').disabled = loading || error || !current?.world.photos?.length;
     find('[data-photo]').disabled = !['running', 'paused'].includes(next);
     find('[data-interact]').disabled = next !== 'running';
     find('.playground-dpad').querySelectorAll('button').forEach(button => { button.disabled = next !== 'running'; });
@@ -123,8 +126,10 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     photography.close(); current.interactions.reset(); clearInputs(); post({ type: 'reset' }); setStatus('paused');
   }
   function setFollow(value) {
-    follow = value; overview = false;
+    follow = value; overview = false; cameraMode = value ? 'follow' : 'free';
+    view.dataset.camera = cameraMode;
     find('[data-follow]').setAttribute('aria-pressed', String(value)); find('[data-overview]').setAttribute('aria-pressed', 'false');
+    for (const mode of ['portrait', 'scenic']) find(`[data-${mode}]`).setAttribute('aria-pressed', 'false');
   }
   function clean(attempt) {
     if (!attempt || attempt.cleaned) return;
@@ -170,25 +175,39 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
     if (!attempt.rig) return;
     applySimulationPose(attempt.rig, pose);
   }
-  function portraitCamera() {
+  function applyShot(attempt) {
+    if (!latestPose || !attempt?.controls) return;
+    const shot = cameraMode === 'scenic' ? scenicView(attempt.world, latestPose, attempt.camera.aspect, attempt.photoPoint, attempt.portraitSize) : portraitView(latestPose, attempt.camera.aspect, attempt.portraitSize);
+    if (attempt.camera.fov !== shot.fov) { attempt.camera.fov = shot.fov; attempt.camera.updateProjectionMatrix(); }
+    attempt.controls.target.copy(shot.target); attempt.camera.position.copy(shot.position);
+  }
+  function frameShot(mode) {
     if (!current?.controls || !latestPose) return;
-    const p = latestPose.root; setFollow(false);
-    current.controls.target.set(p[0], p[2] + .09, -p[1]);
-    current.camera.position.copy(current.controls.target).add(new THREE.Vector3(.34, .14, .48)); current.controls.update();
+    setFollow(false); cameraMode = mode; current.photoPoint = nearestPhoto(current.world, latestPose);
+    view.dataset.camera = mode;
+    if (current.rig) {
+      const bounds = new THREE.Box3().setFromObject(current.rig.group), center = new THREE.Vector3(latestPose.root[0], latestPose.root[2] + .055, -latestPose.root[1]);
+      const extent = ['x', 'y', 'z'].map(axis => Math.max(Math.abs(bounds.min[axis] - center[axis]), Math.abs(bounds.max[axis] - center[axis])));
+      current.portraitSize = Math.max(.28, 2 * Math.hypot(...extent));
+    }
+    find(`[data-${mode}]`).setAttribute('aria-pressed', 'true'); applyShot(current); current.controls.update();
   }
   function showOverview(attempt) {
     if (!attempt?.controls) return;
     const { camera, controls, world } = attempt;
-    const distance = Math.max(world.bounds[0] * 2 / camera.aspect, world.bounds[1] * 2) * (world.id === 'circuit' ? 1.68 : 1.8)
+    camera.fov = world.id === 'park' ? 48 : 40; camera.updateProjectionMatrix();
+    const distance = Math.max(world.bounds[0] * 2 / camera.aspect, world.bounds[1] * 2) * (world.overview?.scale || 1.8)
       * Math.tan(THREE.MathUtils.degToRad(20)) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    controls.target.set(0, .2, 0);
-    const direction = world.id === 'circuit' ? new THREE.Vector3(-1.25, 1.25, 1.4) : new THREE.Vector3(.5, .95, 1.55);
+    const aim = world.overview?.target || [0, 0, .2], axis = world.overview?.direction || [.5, -1.55, .95];
+    controls.target.set(aim[0], aim[2], -aim[1]);
+    const direction = new THREE.Vector3(axis[0], axis[2], -axis[1]);
     camera.position.copy(controls.target).add(direction.normalize().multiplyScalar(distance));
-    setFollow(false); overview = true; find('[data-overview]').setAttribute('aria-pressed', 'true'); controls.update();
+    setFollow(false); overview = true; cameraMode = 'overview'; view.dataset.camera = cameraMode; find('[data-overview]').setAttribute('aria-pressed', 'true'); controls.update();
   }
   function resetCamera(attempt, wide = attempt.world.id === 'circuit') {
     if (wide) { showOverview(attempt); return; }
     const p = latestPose?.root || attempt.world.spawn;
+    attempt.camera.fov = attempt.world.id === 'park' ? 48 : 40; attempt.camera.updateProjectionMatrix();
     attempt.controls.target.set(p[0], p[2] + (attempt.world.id === 'park' ? .38 : 0), -p[1]);
     attempt.camera.position.copy(attempt.controls.target).add(attempt.world.id === 'park' ? new THREE.Vector3(.30, .12, 1.62) : new THREE.Vector3(.62, .29, .8));
     setFollow(true); attempt.controls.update();
@@ -234,31 +253,35 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
       // Runtime initialization overlaps the GPU/environment and visual rig.
       // Observe failures even if graphics setup throws before Promise.all.
       workerPromise.catch(() => {});
-      const scene = new THREE.Scene(); attempt.scene = scene; scene.background = new THREE.Color(world.id === 'arena' ? 0x08080c : 0xf2eedc);
-      if (world.id !== 'arena') scene.fog = new THREE.Fog(0xf2eedc, 26, 54);
+      const atmosphere = world.atmosphere;
+      const scene = new THREE.Scene(); attempt.scene = scene; scene.background = new THREE.Color(atmosphere?.horizon || 0x08080c);
+      if (atmosphere) scene.fog = new THREE.Fog(atmosphere.fog, 18, 48);
       const renderer = new THREE.WebGLRenderer({ antialias: true }); attempt.renderer = renderer;
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = atmosphere?.exposure || 1;
       renderer.shadowMap.enabled = world.id !== 'arena'; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;
       renderer.domElement.setAttribute('role', 'img'); renderer.domElement.setAttribute('aria-label', tr('playgroundCanvas'));
       find('[data-canvas]').append(renderer.domElement);
       renderer.domElement.addEventListener('webglcontextlost', event => { event.preventDefault(); fail(attempt, new Error(tr('playgroundGraphicsError'))); }, { signal: attempt.abort.signal });
-      const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
-      attempt.environment = pmrem.fromScene(room); scene.environment = attempt.environment.texture; scene.environmentIntensity = world.id === 'arena' ? .45 : .30;
-      room.dispose(); pmrem.dispose();
+      attempt.scenery = createEnvironment(world); scene.add(attempt.scenery.group);
+      const pmrem = new THREE.PMREMGenerator(renderer), room = atmosphere ? new THREE.Scene() : new RoomEnvironment();
+      if (atmosphere) { const sky = new THREE.Group(); sky.rotation.x = -Math.PI / 2; sky.add(attempt.scenery.sky.clone()); room.add(sky); }
+      attempt.environment = pmrem.fromScene(room); scene.environment = attempt.environment.texture; scene.environmentIntensity = atmosphere ? .55 : .45;
+      if (!atmosphere) room.dispose(); pmrem.dispose();
       scene.add(new THREE.AmbientLight(0xffffff, world.id === 'arena' ? .6 : .14));
-      if (world.id !== 'arena') scene.add(new THREE.HemisphereLight(0xe4efff, 0xb39970, .50));
+      if (atmosphere) scene.add(new THREE.HemisphereLight(atmosphere.sky, atmosphere.ground, .65));
       for (const [color, power, position] of [[0xffffff, 1.6, [2, 4, 2]], [0xffffff, .4, [-2, 2, 1.5]], [0xffb366, .7, [0, 3, -2]]]) {
         const light = new THREE.DirectionalLight(color, power); light.position.fromArray(position); scene.add(light);
         if (world.id !== 'arena' && power !== 1.6) light.intensity *= .45;
         if (world.id !== 'arena' && power === 1.6) {
-          light.color.setHex(0xffe4ba); light.intensity = 2.6; light.position.set(-3, 6, 4); light.castShadow = true; light.shadow.mapSize.set(2048, 2048);
+          light.color.setHex(atmosphere.sun); light.intensity = atmosphere.power; light.position.set(-3, 6, 4); light.castShadow = true; light.shadow.mapSize.set(2048, 2048);
           Object.assign(light.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: .1, far: 15 });
           light.shadow.bias = -.00015; light.shadow.normalBias = .003;
         }
       }
-      attempt.scenery = createEnvironment(world); scene.add(attempt.scenery.group);
-      const camera = new THREE.PerspectiveCamera(world.id === 'park' ? 52 : 40, 1, .01, world.id === 'arena' ? 40 : 60); attempt.camera = camera;
+      const camera = new THREE.PerspectiveCamera(world.id === 'park' ? 48 : 40, 1, .01, world.id === 'arena' ? 40 : 60); attempt.camera = camera;
       const controls = new OrbitControls(camera, renderer.domElement); attempt.controls = controls;
       controls.enableDamping = true; controls.enablePan = false; controls.minDistance = .35; controls.maxDistance = world.id === 'arena' ? 6 : 40;
       controls.maxPolarAngle = Math.PI / 2 - .025;
@@ -271,6 +294,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix();
         attempt.renderDirty = true;
         if (overview) showOverview(attempt);
+        else if (['portrait', 'scenic'].includes(cameraMode)) applyShot(attempt);
       };
       attempt.observer = new ResizeObserver(resize); attempt.observer.observe(find('[data-canvas]')); resize();
       const target = new THREE.Vector3(), delta = new THREE.Vector3();
@@ -283,6 +307,8 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         if (latestPose) {
           const p = latestPose.root; target.set(p[0], p[2] + (world.id === 'park' ? .38 : 0), -p[1]);
           if (follow) { delta.copy(target).sub(controls.target).multiplyScalar(1 - Math.exp(-12 * elapsed)); controls.target.add(delta); camera.position.add(delta); }
+          else if (['portrait', 'scenic'].includes(cameraMode)) applyShot(attempt);
+          if (attempt.shadowTime !== latestPose.time) { renderer.shadowMap.needsUpdate = true; attempt.shadowTime = latestPose.time; }
           const activity = attempt.activity.getState();
           attempt.scenery.update(latestPose, target, activity, attempt.interactions.getState());
           if (attempt.wateringCan) {
@@ -305,6 +331,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
         attempt.rig = rig;
         attempt.renderDirty = true;
         scene.add(dressSimulationRig(rig, chosen));
+        renderer.shadowMap.needsUpdate = true;
         rig.group.traverse(node => { if (node.userData.kind === 'watering') attempt.wateringCan = { node, base: node.quaternion.clone() }; });
         attempt.waterRotation = new THREE.Quaternion(); attempt.waterAxis = new THREE.Vector3(0, 1, 0); attempt.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
         if (world.gates) { attempt.replay = createReplay(rig); scene.add(attempt.replay.group); }
@@ -321,19 +348,22 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   on(find('[data-reset]'), 'click', reset);
   on(find('[data-follow]'), 'click', () => follow ? setFollow(false) : resetCamera(current, false));
   on(find('[data-overview]'), 'click', () => showOverview(current));
-  on(find('[data-portrait]'), 'click', portraitCamera);
+  on(find('[data-portrait]'), 'click', () => frameShot('portrait'));
+  on(find('[data-scenic]'), 'click', () => frameShot('scenic'));
   on(find('[data-photo]'), 'click', () => photography.take());
   on(find('[data-album]'), 'click', () => photography.album());
-  on(find('[data-replay]'), 'click', () => { if (!current?.record) return; current.replayEnabled = !current.replayEnabled; find('[data-replay]').setAttribute('aria-pressed', String(current.replayEnabled)); });
+  on(find('[data-replay]'), 'click', () => { if (!current?.record) return; current.replayEnabled = !current.replayEnabled; current.renderDirty = true; find('[data-replay]').setAttribute('aria-pressed', String(current.replayEnabled)); });
   on(find('[data-clear-record]'), 'click', () => {
     if (!current?.world.gates) return;
     const saved = keepsakes.clearRace(current.world); current.record = null; current.activity.clearRecord(); current.replayEnabled = false;
+    current.renderDirty = true;
     find('[data-replay]').disabled = true; find('[data-clear-record]').disabled = true; find('[data-replay]').setAttribute('aria-pressed', 'false');
     notice(tr(saved ? 'raceRecordCleared' : 'travelStorage'));
   });
   on(find('[data-interact]'), 'click', () => {
     if (status !== 'running') return;
     clearInputs(); const action = current.interactions.perform(latestPose); if (!action) return;
+    current.renderer.shadowMap.needsUpdate = true;
     notice(tr(action.type === 'water' ? 'gardenDone' : action.type === 'letters' ? 'harborCollected' : 'harborDelivered'));
     current.hudTime = -Infinity; syncPose(current, latestPose);
   });
@@ -374,7 +404,7 @@ export function createPlayground({ host, selection, colors, language, sourceRig,
   return {
     pause, resume, reset,
     get rig() { return current?.rig; },
-    getState: () => ({ status, pose: latestPose, following: follow, worldId: selectedWorld, activity: current?.activity.getState(), interactions: current?.interactions.getState(), replayEnabled: current?.replayEnabled,
+    getState: () => ({ status, pose: latestPose, following: follow, worldId: selectedWorld, camera: current?.camera ? { mode: cameraMode, position: current.camera.position.toArray(), target: current.controls.target.toArray(), fov: current.camera.fov, place: cameraMode === 'scenic' ? current.photoPoint?.id : null } : null, activity: current?.activity.getState(), interactions: current?.interactions.getState(), replayEnabled: current?.replayEnabled,
       record: current?.record ? { duration: current.record.duration, splits: [...current.record.splits] } : null, photos: keepsakes.photoCount(), selection: structuredClone(chosen), colors: { ...colors }, itemIds: selectedItemIds(chosen) }),
     dispose() { if (disposed) return; disposed = true; photography.dispose(); inputs.abort(); clearInputs(); clean(current); current = null; host.replaceChildren(); },
   };

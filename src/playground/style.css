@@ -11,7 +11,8 @@
 .playground-activity strong { font-size: 13px; font-weight: 500; }.playground-activity span { font-size: 12px; color: #e1d9c9; }
 .playground-stamps { display: flex; gap: 5px; flex-wrap: wrap; max-width: 320px; }.playground-stamps:empty { display: none; }
 .playground-stamps span { border: 1px solid #ffffff30; border-radius: 5px; padding: 4px 6px; font-size: 10px; }.playground-stamps .collected { border-color: #ffc482; color: #ffc482; }
-.playground-tools { position: absolute; top: 110px; right: 30px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: end; max-width: 350px; }
+.playground-tools { position: absolute; top: 110px; right: 30px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: end; max-width: 430px; }
+.playground-tools [aria-pressed=true] { border-color: #d8bf91; color: #ffe0ad; background: #40594ce8; }
 .playground-race-tools { display: flex; gap: 6px; pointer-events: auto; }
 .playground-activity [data-race-splits]:empty { display: none; }
 .playground-race-tools button { min-height: 32px !important; padding: 6px 9px !important; font-size: 11px !important; }
@@ -61,6 +62,7 @@
 .playground-spark { color: #ffb366; font-size: 30px; }
 .playground-message button { margin-top: 8px; background: #f4be79; color: #211810; }
 .playground-paused { position: absolute; left: 50%; top: 100px; transform: translateX(-50%); padding: 9px 20px; background: #18191fe8; border: 1px solid #ffffff30; border-radius: 99px; pointer-events: none; }
+.playground-view:is([data-camera=portrait], [data-camera=scenic]) .playground-paused { display: none; }
 @media (max-width: 650px) {
   .playground-header { padding: max(14px, env(safe-area-inset-top)) 14px 16px; gap: 12px; align-items: start; flex-wrap: wrap; }
   .playground-title { order: 3; width: 100%; gap: 4px; }
