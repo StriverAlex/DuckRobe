@@ -136,11 +136,9 @@ export function makeInfiniteGrid() {
       }
     `,
   });
-  // Subdivided so the relief displacement has vertices to push: ~12 cm
-  // steps, plenty for the gentle bump radii (>= 0.5 m). The displacement
-  // is computed in world space, so the per-frame recentering under the
-  // camera target doesn't move the bumps.
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 30, 256, 256), material);
+  // This playground has a flat floor. The world-space shader draws the
+  // same grid on two triangles; relief subdivisions only cost GPU work.
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), material);
   mesh.rotation.x = -Math.PI / 2;
   return mesh;
 }

@@ -34,8 +34,17 @@ self.onmessage = async ({ data }) => {
       const [{ default: loadMujoco }, ort] = await Promise.all([import('@mujoco/mujoco'), import('onnxruntime-web/wasm')]);
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.wasmPaths = { wasm: new URL(ortWasmUrl, self.location.href).href };
-      const mujoco = await loadMujoco({ locateFile: p => p.endsWith('.wasm') ? new URL(mujocoWasmUrl, self.location.href).href : p });
-      simulation = await createSimulation({ mujoco, ort, ...data, onProgress: stage => send('progress', { stage }) });
+      // Neither runtime depends on the other. Download/initialize both at
+      // once, and settle both so a failed runtime cannot leak a session.
+      const [runtime, policy] = await Promise.allSettled([
+        loadMujoco({ locateFile: p => p.endsWith('.wasm') ? new URL(mujocoWasmUrl, self.location.href).href : p }),
+        ort.InferenceSession.create(data.policyUrl, { executionProviders: ['wasm'] }),
+      ]);
+      if (runtime.status === 'rejected' || policy.status === 'rejected') {
+        if (policy.status === 'fulfilled') await policy.value.release();
+        throw runtime.status === 'rejected' ? runtime.reason : policy.reason;
+      }
+      simulation = await createSimulation({ mujoco: runtime.value, ort, ...data, policySession: policy.value, onProgress: stage => send('progress', { stage }) });
       send('ready', { pose: simulation.snapshot() });
     } else if (data.type === 'command') command = { forward: data.forward, turn: data.turn };
     else if (data.type === 'pause') { paused = true; command = {}; clearTimeout(timer); }

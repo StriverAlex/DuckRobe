@@ -3,8 +3,8 @@ import { CONTROL_DT, DECIMATION, DEFAULT_POSE, JOINT_NAMES, OBS_SIZE } from './c
 // The same observation and position-target loop as the pinned Sandbox.
 // Runtime dependencies are injected so fixed-step checks exercise this exact
 // controller without a render loop, worker timer, or wardrobe state.
-export async function createSimulation({ mujoco, ort, xml, meshes, policyUrl, onProgress = () => {} }) {
-  let vfs, model, data, session;
+export async function createSimulation({ mujoco, ort, xml, meshes, policyUrl, policySession, onProgress = () => {} }) {
+  let vfs, model, data, session = policySession;
   const dispose = async () => { data?.delete(); model?.delete(); vfs?.delete(); await session?.release(); };
   try {
     onProgress('compile');
@@ -19,8 +19,10 @@ export async function createSimulation({ mujoco, ort, xml, meshes, policyUrl, on
     const gyroAdr = read(model.sensor('imu_ang_vel'), 'adr');
     const trunkId = read(model.body('trunk_base'), 'id');
     const standId = read(model.key('STAND'), 'id');
-    onProgress('policy');
-    session = await ort.InferenceSession.create(policyUrl, { executionProviders: ['wasm'] });
+    if (!session) {
+      onProgress('policy');
+      session = await ort.InferenceSession.create(policyUrl, { executionProviders: ['wasm'] });
+    }
     const obs = new Float32Array(OBS_SIZE), lastAction = new Float32Array(14);
     let fallenFor = 0;
 

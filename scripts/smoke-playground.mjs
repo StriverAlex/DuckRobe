@@ -31,6 +31,14 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });
     await context.addInitScript(() => {
       // Instrument the browser boundary, without adding hooks to production.
+      window.__playgroundDraws = 0;
+      for (const prototype of [WebGLRenderingContext.prototype, WebGL2RenderingContext.prototype]) {
+        const draw = prototype.drawElements;
+        prototype.drawElements = function(...args) {
+          if (this.canvas.parentElement?.classList.contains('playground-canvas')) window.__playgroundDraws++;
+          return draw.apply(this, args);
+        };
+      }
       window.__workers = { active: 0, created: 0, messages: [], instances: [], resets: 0 };
       const NativeWorker = window.Worker;
       window.Worker = class extends NativeWorker {
@@ -99,6 +107,32 @@ try {
         assert.equal(await page.evaluate(() => window.__workers.messages.at(-1).forward), 0);
         await page.keyboard.up('ArrowUp');
       });
+      await check(`${base} idle pause stops drawing; camera, resize and resume redraw`, async () => {
+        await page.locator('[data-pause]').click(); await status('paused');
+        const settle = () => page.waitForFunction(() => {
+          const draws = window.__playgroundDraws, now = performance.now();
+          if (window.__lastDraws !== draws) { window.__lastDraws = draws; window.__drawsSettledAt = now; }
+          return draws > 0 && now - window.__drawsSettledAt > 600;
+        });
+        await settle();
+        const frozen = await page.evaluate(() => window.__playgroundDraws);
+        await page.waitForTimeout(600); assert.equal(await page.evaluate(() => window.__playgroundDraws), frozen);
+        await page.mouse.move(700, 380); await page.mouse.down(); await page.mouse.move(780, 420, { steps: 4 }); await page.mouse.up();
+        await page.waitForFunction(draws => window.__playgroundDraws > draws, frozen);
+        await settle();
+        const orbitDraws = await page.evaluate(() => window.__playgroundDraws);
+        await page.mouse.wheel(0, 150);
+        await page.waitForFunction(draws => window.__playgroundDraws > draws, orbitDraws);
+        await settle();
+        const zoomDraws = await page.evaluate(() => window.__playgroundDraws);
+        await page.setViewportSize({ width: 1400, height: 880 });
+        await page.waitForFunction(draws => window.__playgroundDraws > draws, zoomDraws);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.locator('[data-follow]').click();
+        const pausedDraws = await page.evaluate(() => window.__playgroundDraws);
+        await page.locator('[data-pause]').click(); await advance(.1);
+        await page.waitForFunction(draws => window.__playgroundDraws > draws, pausedDraws);
+      });
       await check(`${base} pause, explicit visibility resume, reset, orbit and follow`, async () => {
         await page.locator('[data-pause]').click(); await status('paused'); await page.waitForTimeout(100);
         const frozen = (await state()).pose.time; await page.waitForTimeout(120); assert.equal((await state()).pose.time, frozen);
@@ -130,6 +164,9 @@ try {
       });
       if (base === '/') {
         await check('missing model assets show Retry and Back; retry recovers', async () => {
+          // A new page drops successful prepared-asset caches, so this still
+          // exercises a genuinely missing cold-load asset.
+          await page.reload(); await page.waitForFunction(() => window.duckrobe?.ready);
           await page.route('**/playground/robot.xml', route => route.fulfill({ status: 404, body: 'missing' }), { times: 1 });
           await page.locator('#open-playground').click(); await status('error');
           assert.match(await page.locator('[data-detail]').innerText(), /404/);
@@ -213,6 +250,15 @@ try {
     const context = await browser.newContext({ viewport: { width: 1100, height: 740 } });
     const page = await context.newPage();
     try {
+      for (const asset of ['@mujoco/mujoco/mujoco.wasm', 'onnxruntime-web/dist/ort-wasm-simd-threaded.wasm']) {
+        const response = await context.request.get(`http://127.0.0.1:${dev.httpServer.address().port}/node_modules/${asset}`, { headers: { 'Accept-Encoding': 'gzip' } });
+        const bytes = await readFile(`node_modules/${asset}`);
+        assert.equal(response.headers()['content-encoding'], 'gzip');
+        const vary = response.headers().vary.toLowerCase().split(',').map(value => value.trim());
+        assert(vary.includes('origin') && vary.includes('accept-encoding'));
+        assert(Number(response.headers()['content-length']) < bytes.length / 2);
+        assert.deepEqual(await response.body(), bytes);
+      }
       await page.goto(`http://127.0.0.1:${dev.httpServer.address().port}`);
       await page.waitForFunction(() => window.duckrobe?.ready);
       const origin = await page.evaluate(() => performance.timeOrigin);

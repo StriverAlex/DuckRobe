@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createBehaviorController } from './behavior.js';
+import { indexRobotGeometry } from './robot-geometry.js';
 
 // Microduck's CAD frames use metres, +X forward and +Z up. Keep those
 // frames intact so preview geometry and the native MJCF export agree.
@@ -83,8 +84,7 @@ async function json(url, signal) {
   return response.json();
 }
 
-export async function loadRobot({ colors, signal } = {}) {
-  const bodyColors = normalizeRobotColors(colors);
+async function loadRobotAssets(signal) {
   const manifest = await json(robotAssetUrl('/robot/manifest.json'), signal);
   const web = {
     ...manifest.web,
@@ -118,12 +118,34 @@ export async function loadRobot({ colors, signal } = {}) {
     scaled.scale(1000, 1000, 1000);
     const geometry = toCreasedNormals(scaled, Math.PI / 5);
     geometry.scale(0.001, 0.001, 0.001);
+    indexRobotGeometry(geometry);
     geometry.computeBoundingBox();
     scaled.dispose();
     geometries.set(name, geometry);
     object.geometry.dispose();
     (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => material.dispose());
   });
+
+  return { manifest, web, native, kinematics, geometries };
+}
+
+export async function loadRobot({ colors, signal, sourceRig } = {}) {
+  signal?.throwIfAborted();
+  const bodyColors = normalizeRobotColors(colors);
+  let assets;
+  if (sourceRig) {
+    // Rebuild the reference body tree from already prepared native meshes.
+    // Own the geometry copies so disposing this rig cannot evict the preview's
+    // GPU resources, and exclude its clothes, current pose and materials.
+    const geometries = new Map();
+    sourceRig.group.traverse(node => {
+      const name = node.userData.meshFile;
+      if (node.isMesh && name && !geometries.has(name)) geometries.set(name, node.geometry.clone());
+    });
+    const { web, native, kinematics } = sourceRig.metadata;
+    assets = { manifest: sourceRig.metadata, web, native, kinematics, geometries };
+  } else assets = await loadRobotAssets(signal);
+  const { manifest, web, native, kinematics, geometries } = assets;
 
   const group = new THREE.Group();
   group.name = 'microduck';

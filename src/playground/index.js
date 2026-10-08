@@ -19,7 +19,7 @@ function disposeTree(root) {
   geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose());
 }
 
-export function createPlayground({ host, selection, colors, language, onExit }) {
+export function createPlayground({ host, selection, colors, language, sourceRig, onExit }) {
   const tr = key => t(key, language), chosen = normalizeSelection(selection);
   const inputs = new AbortController(), keys = new Set(), pointers = new Map(), pulses = new Set();
   const directions = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
@@ -106,6 +106,7 @@ export function createPlayground({ host, selection, colors, language, onExit }) 
   }
   function syncPose(attempt, pose) {
     latestPose = pose;
+    attempt.renderDirty = true;
     if (!attempt.rig) return;
     applySimulationPose(attempt.rig, pose);
   }
@@ -121,6 +122,29 @@ export function createPlayground({ host, selection, colors, language, onExit }) 
     const alive = () => !disposed && current === attempt && !attempt.abort.signal.aborted;
     attempt.timeout = setTimeout(() => fail(attempt, new Error(tr('playgroundTimeout'))), 60000);
     try {
+      const baseUrl = new URL(robotAssetUrl('/playground/'), location.href).href;
+      const model = await loadPhysicsAssets(baseUrl, attempt.abort.signal);
+      if (!alive()) return;
+      const workerPromise = (async () => {
+        const worker = new Worker(new URL('./physics.worker.js', import.meta.url), { type: 'module' }); attempt.worker = worker;
+        await new Promise((resolve, reject) => {
+          attempt.abort.signal.addEventListener('abort', () => reject(new DOMException('Playground closed', 'AbortError')), { once: true });
+          worker.onerror = event => { event.preventDefault(); const error = new Error(event.message || tr('playgroundError')); reject(error); fail(attempt, error); };
+          worker.onmessage = ({ data }) => {
+            if (!alive()) return;
+            if (data.type === 'progress') { stage = data.stage; setStatus('loading'); }
+            else if (data.type === 'ready') { syncPose(attempt, data.pose); resolve(); }
+            else if (data.type === 'pose') syncPose(attempt, data.pose);
+            else if (data.type === 'fallen') { clearInputs(); setStatus('fallen'); }
+            else if (data.type === 'reset') { resetCamera(attempt); if (!document.hidden) resume(); }
+            else if (data.type === 'error') { const error = new Error(data.message); reject(error); fail(attempt, error); }
+          };
+          worker.postMessage({ type: 'init', ...model, policyUrl: new URL('walking.onnx', baseUrl).href }, model.meshes.map(mesh => mesh.bytes));
+        });
+      })();
+      // Runtime initialization overlaps the GPU/environment and visual rig.
+      // Observe failures even if graphics setup throws before Promise.all.
+      workerPromise.catch(() => {});
       const scene = new THREE.Scene(); attempt.scene = scene; scene.background = new THREE.Color(0x08080c);
       const renderer = new THREE.WebGLRenderer({ antialias: true }); attempt.renderer = renderer;
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -142,11 +166,13 @@ export function createPlayground({ host, selection, colors, language, onExit }) 
       controls.enableDamping = true; controls.enablePan = false; controls.minDistance = .35; controls.maxDistance = 6;
       controls.maxPolarAngle = Math.PI / 2 - .025;
       controls.addEventListener('start', () => setFollow(false));
+      controls.addEventListener('change', () => { attempt.renderDirty = true; });
       resetCamera(attempt);
       const resize = () => {
         const { width, height } = find('[data-canvas]').getBoundingClientRect();
         if (!width || !height) return;
         renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix();
+        attempt.renderDirty = true;
       };
       attempt.observer = new ResizeObserver(resize); attempt.observer.observe(find('[data-canvas]')); resize();
       const target = new THREE.Vector3(), delta = new THREE.Vector3();
@@ -161,35 +187,21 @@ export function createPlayground({ host, selection, colors, language, onExit }) 
           if (follow) { delta.copy(target).sub(controls.target).multiplyScalar(1 - Math.exp(-12 * elapsed)); controls.target.add(delta); camera.position.add(delta); }
           arenaMaterials.forEach(mat => mat.uniforms.uFocus.value.copy(target));
         }
-        controls.update(); renderer.render(scene, camera);
+        const cameraChanged = controls.update();
+        // Paused/fallen scenes need drawing only after a pose, camera or size
+        // change. Keep initialization warm and walking animated as before.
+        if (!['loading', 'running'].includes(status) && !cameraChanged && !attempt.renderDirty) return;
+        renderer.render(scene, camera); attempt.renderDirty = false;
       }
+      // Warm the render pipeline while the independent runtimes initialize.
       frame();
-      const baseUrl = new URL(robotAssetUrl('/playground/'), location.href).href;
-      const rigPromise = loadRobot({ colors, signal: attempt.abort.signal }).then(rig => {
+      const rigPromise = loadRobot({ colors, signal: attempt.abort.signal, sourceRig }).then(rig => {
         if (!alive()) { disposeTree(rig.group); return; }
         attempt.rig = rig;
+        attempt.renderDirty = true;
         scene.add(dressSimulationRig(rig, chosen));
         if (latestPose) syncPose(attempt, latestPose);
       });
-      const workerPromise = (async () => {
-        const model = await loadPhysicsAssets(baseUrl, attempt.abort.signal);
-        if (!alive()) return;
-        const worker = new Worker(new URL('./physics.worker.js', import.meta.url), { type: 'module' }); attempt.worker = worker;
-        await new Promise((resolve, reject) => {
-          attempt.abort.signal.addEventListener('abort', () => reject(new DOMException('Playground closed', 'AbortError')), { once: true });
-          worker.onerror = event => { event.preventDefault(); const error = new Error(event.message || tr('playgroundError')); reject(error); fail(attempt, error); };
-          worker.onmessage = ({ data }) => {
-            if (!alive()) return;
-            if (data.type === 'progress') { stage = data.stage; setStatus('loading'); }
-            else if (data.type === 'ready') { syncPose(attempt, data.pose); resolve(); }
-            else if (data.type === 'pose') syncPose(attempt, data.pose);
-            else if (data.type === 'fallen') { clearInputs(); setStatus('fallen'); }
-            else if (data.type === 'reset') { resetCamera(attempt); if (!document.hidden) resume(); }
-            else if (data.type === 'error') { const error = new Error(data.message); reject(error); fail(attempt, error); }
-          };
-          worker.postMessage({ type: 'init', ...model, policyUrl: new URL('walking.onnx', baseUrl).href }, model.meshes.map(mesh => mesh.bytes));
-        });
-      })();
       await Promise.all([rigPromise, workerPromise]);
       if (!alive()) return;
       clearTimeout(attempt.timeout); resetCamera(attempt); setStatus('paused'); resume();

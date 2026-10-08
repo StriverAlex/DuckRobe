@@ -34,6 +34,24 @@ for (const [name, source] of Object.entries(manifest.files)) {
 console.log('PASS pinned asset sizes and SHA-256 hashes');
 
 const assets = await loadPhysicsAssets('http://duckrobe.test/playground/');
+const copy = await loadPhysicsAssets('http://duckrobe.test/playground/');
+assert.equal(copy.xml, assets.xml);
+for (let i = 0; i < assets.meshes.length; i++) {
+  assert.notEqual(copy.meshes[i].bytes, assets.meshes[i].bytes);
+  assert.deepEqual(new Uint8Array(copy.meshes[i].bytes), new Uint8Array(assets.meshes[i].bytes));
+}
+structuredClone(copy, { transfer: copy.meshes.map(mesh => mesh.bytes) });
+const cached = await loadPhysicsAssets('http://duckrobe.test/playground/');
+cached.meshes.forEach((mesh, i) => assert.deepEqual(new Uint8Array(mesh.bytes), new Uint8Array(assets.meshes[i].bytes)));
+console.log('PASS cached physics assets survive transferable worker ownership');
+let releases = 0, deletedVfs = 0;
+const compileFailure = new Error('Expected compilation failure');
+await assert.rejects(createSimulation({
+  mujoco: { MjVFS: class { delete() { deletedVfs++; } }, MjModel: { from_xml_string() { throw compileFailure; } } },
+  xml: '', meshes: [], policySession: { async release() { releases++; } },
+}), error => error === compileFailure);
+assert.equal(releases, 1); assert.equal(deletedVfs, 1);
+console.log('PASS preloaded policy session released exactly once on compilation failure');
 const world = new DOMParser().parseFromString(assets.xml, 'text/xml').getElementsByTagName('worldbody')[0];
 assert([...world.getElementsByTagName('geom')].every(g => g.getAttribute('class') !== 'visual'));
 const policyUrl = new Uint8Array(await readFile('public/playground/walking.onnx'));
@@ -106,6 +124,27 @@ try {
   const official = JSON.parse(await readFile('public/playground/kinematics.json'));
   const colors = { shell: '#76a999', accent: '#ffc36b' };
   const rig = await loadRobot({ colors });
+  rig.setJoint('head_yaw', .4);
+  const copiedRig = await loadRobot({ sourceRig: rig, colors: { shell: '#bdace3', accent: '#f2dbac' } });
+  assert.equal(copiedRig.joints.get('head_yaw').angle, DEFAULT_POSE[JOINT_NAMES.indexOf('head_yaw')]);
+  assert.deepEqual(copiedRig.metadata.anchorDefinitions, rig.metadata.anchorDefinitions);
+  const sourceMeshes = new Map(); rig.group.traverse(mesh => { if (mesh.isMesh) sourceMeshes.set(mesh.name, mesh); });
+  copiedRig.group.traverse(mesh => {
+    if (!mesh.isMesh) return;
+    const source = sourceMeshes.get(mesh.name); assert(source);
+    assert.notEqual(mesh.geometry, source.geometry);
+    assert.notEqual(mesh.geometry.attributes.position.array, source.geometry.attributes.position.array);
+    assert.deepEqual(mesh.geometry.attributes.position.array, source.geometry.attributes.position.array);
+    assert.notEqual(mesh.geometry.attributes.normal.array, source.geometry.attributes.normal.array);
+    assert.deepEqual(mesh.geometry.attributes.normal.array, source.geometry.attributes.normal.array);
+    assert.notEqual(mesh.geometry.index.array, source.geometry.index.array);
+    assert.deepEqual(mesh.geometry.index.array, source.geometry.index.array);
+    assert.notEqual(mesh.material, source.material);
+  });
+  copiedRig.setColors(colors);
+  assert.deepEqual(rig.metadata.bodyColors, colors);
+  rig.setJoint('head_yaw', DEFAULT_POSE[JOINT_NAMES.indexOf('head_yaw')]);
+  console.log('PASS prepared visual rig copies retain reference anchors with independent geometry and materials');
   assert.equal(rig.metadata.kinematics.bodies.length, official.bodies.length);
   for (const body of official.bodies) {
     const own = rig.metadata.kinematics.bodies.find(b => b.name === body.name);

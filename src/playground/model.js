@@ -2,6 +2,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ARENA_HALF, ARENA_WALL_H, ARENA_WALL_T, DEFAULT_POSE, JOINT_NAMES, SPAWN, TIMESTEP } from './constants.js';
 
 const elements = (parent, name) => Array.from(parent.getElementsByTagName(name));
+let preparedAssets;
+const copyAssets = ({ xml, meshes }) => ({ xml, meshes: meshes.map(({ name, bytes }) => ({ name, bytes: bytes.slice(0) })) });
 
 // Same preparation as the official Sandbox, with only the flat walking
 // arena. Decorative geometry never enters this XML or the MuJoCo VFS.
@@ -47,19 +49,30 @@ export function geometryToBinaryStl(geometry) {
   const count = (indices ? indices.count : pos.count) / 3;
   const bytes = new ArrayBuffer(84 + count * 50), view = new DataView(bytes);
   view.setUint32(80, count, true);
-  const vertex = i => { const j = indices ? indices.getX(i) : i; return [pos.getX(j), pos.getY(j), pos.getZ(j)]; };
   for (let t = 0, offset = 84; t < count; t++, offset += 50) {
-    const a = vertex(t * 3), b = vertex(t * 3 + 1), c = vertex(t * 3 + 2);
-    const n = [(b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
-      (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
-      (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])];
-    const length = Math.hypot(...n) || 1;
-    [...n.map(v => v / length), ...a, ...b, ...c].forEach((value, i) => view.setFloat32(offset + i * 4, value, true));
+    const a = indices ? indices.getX(t * 3) : t * 3;
+    const b = indices ? indices.getX(t * 3 + 1) : t * 3 + 1;
+    const c = indices ? indices.getX(t * 3 + 2) : t * 3 + 2;
+    const ax = pos.getX(a), ay = pos.getY(a), az = pos.getZ(a);
+    const bx = pos.getX(b), by = pos.getY(b), bz = pos.getZ(b);
+    const cx = pos.getX(c), cy = pos.getY(c), cz = pos.getZ(c);
+    const nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    const nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const length = Math.hypot(nx, ny, nz) || 1;
+    view.setFloat32(offset, nx / length, true); view.setFloat32(offset + 4, ny / length, true); view.setFloat32(offset + 8, nz / length, true);
+    view.setFloat32(offset + 12, ax, true); view.setFloat32(offset + 16, ay, true); view.setFloat32(offset + 20, az, true);
+    view.setFloat32(offset + 24, bx, true); view.setFloat32(offset + 28, by, true); view.setFloat32(offset + 32, bz, true);
+    view.setFloat32(offset + 36, cx, true); view.setFloat32(offset + 40, cy, true); view.setFloat32(offset + 44, cz, true);
   }
   return bytes;
 }
 
 export async function loadPhysicsAssets(baseUrl, signal) {
+  signal?.throwIfAborted();
+  // Keep only one successful immutable model, never a failed/loading promise.
+  // Each worker owns transferred copies; cached buffers must stay attached.
+  if (preparedAssets?.baseUrl === baseUrl) return copyAssets(preparedAssets);
   const fetchAsset = async name => {
     const response = await fetch(new URL(name, baseUrl), { signal });
     if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
@@ -79,7 +92,9 @@ export async function loadPhysicsAssets(baseUrl, signal) {
       if (!geometry) throw new Error(`Missing official collision mesh: ${name}`);
       meshes.push({ name: `assets/${name}`, bytes: geometryToBinaryStl(geometry) });
     }
-    return { xml, meshes };
+    signal?.throwIfAborted();
+    preparedAssets = { baseUrl, xml, meshes };
+    return copyAssets(preparedAssets);
   } finally {
     gltf.scene.traverse(node => { if (node.isMesh) { node.geometry.dispose(); (Array.isArray(node.material) ? node.material : [node.material]).forEach(m => m.dispose()); } });
   }

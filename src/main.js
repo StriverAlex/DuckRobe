@@ -294,7 +294,7 @@ async function openPlayground() {
   try {
     const { createPlayground } = await import('./playground/index.js');
     if (visit !== playgroundVisit || !playgroundDialog.open) return;
-    playground = createPlayground({ host, selection: structuredClone(state.selection), colors: { ...state.colors }, language: state.language, onExit: closePlayground });
+    playground = createPlayground({ host, selection: structuredClone(state.selection), colors: { ...state.colors }, language: state.language, sourceRig: preview.rig, onExit: closePlayground });
     window.duckrobe.playground = playground;
   } catch (error) {
     if (visit !== playgroundVisit || !playgroundDialog.open) return;

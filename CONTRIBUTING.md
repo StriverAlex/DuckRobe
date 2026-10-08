@@ -52,6 +52,14 @@ observations. Adjust garment placement if needed, then rerun wardrobe/export
 checks. New lifecycle work must cover close/retry during initialization and
 must leave no worker, listener, observer or render loop running after exit.
 
+For loading or rendering changes, run `node scripts/profile-playground.mjs local`
+against Vite. It records first/repeat entry, worker timing and rendering counters
+at two pixel ratios. Its headless SwiftShader frame rate is software-rendering
+evidence; verify performance on the affected device before claiming an FPS gain.
+Run `node scripts/validate-robot-geometry.mjs` after native render-mesh changes;
+it compares every triangle position and shading normal against the original
+preparation pipeline and verifies independent hard-edge vertices and index width.
+
 Upstream simulator assets are pinned in `public/playground/manifest.json`.
 Updating them is a deliberate separate change: record source revision, URLs,
 sizes and SHA-256 hashes; verify body frames, the 61-value observation order,
